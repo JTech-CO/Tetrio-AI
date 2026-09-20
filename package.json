@@ -1,0 +1,20 @@
+{
+  "name": "tetrio-ai",
+  "version": "1.0.0",
+  "description": "TETR.IO ZEN mode auto-player (CDP + pixel vision + Dellacherie AI) for the desktop app, with ad blocking.",
+  "main": "src/run.js",
+  "scripts": {
+    "start": "node src/run.js",
+    "restart": "node src/run.js --restart",
+    "test": "node --test test/board.test.js test/ai.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "chrome-remote-interface": "^0.34.0",
+    "jpeg-js": "^0.4.4",
+    "pngjs": "^7.0.0"
+  }
+}
