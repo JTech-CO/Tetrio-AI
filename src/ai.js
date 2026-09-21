@@ -99,7 +99,8 @@ function locksInHiddenRows(placeResult) {
 // beam (0 = off): evaluate the expensive depth-2 child search only for the top-N
 // placements by parent-only score. Cuts pickMove ~35ms -> ~12ms; with beam=0 the
 // behavior (including tie-break order) is EXACTLY the original full search.
-function pickMove({ board, current, queue = [], hold = null, canHold = true, keyPenalty = 0, beam = 0 }) {
+function pickMove({ board, current, queue = [], hold = null, canHold = true, keyPenalty = 0, beam = 0,
+                    estimateInput = null, inputPenalty = 0 }) {
   const candidates = [
     { useHold: false, piece: current, next: queue[0] },
   ];
@@ -122,6 +123,9 @@ function pickMove({ board, current, queue = [], hold = null, canHold = true, key
     for (let i = 0; i < placements.length; i++) {
       const p = placements[i];
       let score = evaluate(p.result, p.result.board);
+      const estimatedInputMs = estimateInput
+        ? estimateInput({ piece: cand.piece, rot: p.rot, col: p.col, useHold: cand.useHold }) : null;
+      if (estimatedInputMs != null) score -= Math.min(0.02, Math.max(0, inputPenalty)) * estimatedInputMs;
       // A lock-out ends the game: only ever pick it when literally every
       // available placement ends the game.
       if (p.result.lockOut) score += LOCK_OUT;
@@ -133,6 +137,7 @@ function pickMove({ board, current, queue = [], hold = null, canHold = true, key
       }
       entries.push({
         useHold: cand.useHold,
+        estimatedInputMs,
         piece: cand.piece,
         rot: p.rot,
         col: p.col,
@@ -185,6 +190,8 @@ function pickMove({ board, current, queue = [], hold = null, canHold = true, key
 
   return {
     useHold: best.useHold,
+    piece: best.piece,
+    estimatedInputMs: best.estimatedInputMs,
     rot: best.rot,
     col: best.col,
     keys,

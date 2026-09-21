@@ -1,0 +1,87 @@
+{
+  "measuredAt": "2026-09-21T01:15:57.790Z",
+  "jev": "disabled",
+  "calibration": {
+    "version": 1,
+    "scope": "ZEN",
+    "validated": true,
+    "tapHoldMs": 17,
+    "tapGapMs": 5,
+    "afterRotateMs": 10,
+    "spawnMs": 65,
+    "settleMs": 15,
+    "settleClearMs": 100,
+    "wallHoldMs": null,
+    "precharge": false,
+    "overlap": true,
+    "environment": {
+      "viewport": {
+        "w": 1295,
+        "h": 999,
+        "dpr": 2
+      },
+      "measuredAt": "2026-09-21T01:08:54.472Z",
+      "port": 9222,
+      "visualProfile": {
+        "bounciness": 0,
+        "shakiness": 0,
+        "actiontext": "off"
+      }
+    },
+    "evidence": {
+      "pieces": 120,
+      "mismatches": 0,
+      "wallLeft": 0,
+      "wallRight": 0,
+      "keys": {
+        "180": 9,
+        "left": 126,
+        "hard": 120,
+        "cw": 23,
+        "right": 164,
+        "hold": 29,
+        "ccw": 7
+      },
+      "bursts": 73,
+      "transientFrames": 0,
+      "maxVerificationMs": 199.6863000000012,
+      "overlapped": 35,
+      "seconds": 23.4736789
+    }
+  },
+  "note": "TURBO-only live segment. Prior RAPID results are recorded separately. No warmup pieces enter the measured count or time.",
+  "segments": [
+    {
+      "requestedMode": "TURBO",
+      "finalMode": "RAPID",
+      "pieces": 1000,
+      "seconds": 205.72583540000002,
+      "pps": 4.860838202725801,
+      "resyncs": 2,
+      "mispredicts": 2,
+      "lines": 400,
+      "error": null,
+      "turbo": {
+        "verified": 425,
+        "fullReads": 166,
+        "boardReads": 261,
+        "mismatchWindows": 2,
+        "suspectPieces": 5,
+        "forcedResyncs": 2,
+        "inputErrors": 0,
+        "verificationLatencyMs": 396.3388999999879,
+        "effectivePps": 5.311891802698644,
+        "transientFrames": 16,
+        "fallbackReason": "consecutive verification mismatches",
+        "sequence": 638
+      }
+    }
+  ],
+  "visualProfile": {
+    "bounciness": 0,
+    "shakiness": 0,
+    "actiontext": "off"
+  },
+  "passed": false,
+  "enduranceRun": true
+}

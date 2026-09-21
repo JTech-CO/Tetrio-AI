@@ -1,0 +1,89 @@
+{
+  "measuredAt": "2026-09-21T01:41:33.074Z",
+  "jev": "disabled",
+  "calibration": {
+    "version": 1,
+    "scope": "ZEN",
+    "validated": true,
+    "tapHoldMs": 17,
+    "tapGapMs": 5,
+    "afterRotateMs": 10,
+    "spawnMs": 65,
+    "settleMs": 15,
+    "settleClearMs": 100,
+    "wallHoldMs": null,
+    "precharge": false,
+    "overlap": true,
+    "environment": {
+      "viewport": {
+        "w": 1295,
+        "h": 999,
+        "dpr": 2
+      },
+      "measuredAt": "2026-09-21T01:08:54.472Z",
+      "port": 9222,
+      "visualProfile": {
+        "bounciness": 0,
+        "shakiness": 0,
+        "actiontext": "off"
+      }
+    },
+    "evidence": {
+      "pieces": 120,
+      "mismatches": 0,
+      "wallLeft": 0,
+      "wallRight": 0,
+      "keys": {
+        "180": 9,
+        "left": 126,
+        "hard": 120,
+        "cw": 23,
+        "right": 164,
+        "hold": 29,
+        "ccw": 7
+      },
+      "bursts": 73,
+      "transientFrames": 0,
+      "maxVerificationMs": 199.6863000000012,
+      "overlapped": 35,
+      "seconds": 23.4736789
+    }
+  },
+  "note": "TURBO-only live segment. Prior RAPID results are recorded separately. No warmup pieces enter the measured count or time.",
+  "segments": [
+    {
+      "requestedMode": "TURBO",
+      "finalMode": "RAPID",
+      "pieces": 456,
+      "seconds": 86.3493028,
+      "pps": 5.280876454279837,
+      "conservativePps": 5.211391237776155,
+      "resyncs": 2,
+      "mispredicts": 2,
+      "lines": 181,
+      "error": "DEGRADED: 렌더러 화면 축소 감지 (필드 높이 비율 0.207 < 기준 0.463) — 앱 재시작 필요",
+      "turbo": {
+        "verified": 314,
+        "fullReads": 119,
+        "boardReads": 197,
+        "mismatchWindows": 2,
+        "suspectPieces": 6,
+        "forcedResyncs": 2,
+        "inputErrors": 0,
+        "verificationLatencyMs": 401.8660000000091,
+        "effectivePps": 5.550119109755198,
+        "transientFrames": 10,
+        "stageTransitions": 0,
+        "fallbackReason": "consecutive verification mismatches",
+        "sequence": 456
+      }
+    }
+  ],
+  "visualProfile": {
+    "bounciness": 0,
+    "shakiness": 0,
+    "actiontext": "off"
+  },
+  "passed": false,
+  "enduranceRun": false
+}

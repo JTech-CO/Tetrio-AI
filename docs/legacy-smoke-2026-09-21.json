@@ -1,0 +1,45 @@
+{
+  "measuredAt": "2026-09-21T01:39:01.545Z",
+  "note": "Sequential 60-piece live smoke runs with original video settings; mismatches are pixel estimates, not a controlled accuracy benchmark.",
+  "results": [
+    {
+      "mode": "BASIC",
+      "pieces": 60,
+      "seconds": 26.9658916,
+      "resyncs": 0,
+      "mispredicts": 1,
+      "stageUps": 2
+    },
+    {
+      "mode": "RAPID",
+      "pieces": 60,
+      "seconds": 17.539718899999997,
+      "resyncs": 0,
+      "mispredicts": 12,
+      "stageUps": 1
+    }
+  ],
+  "afterReobservationFix": {
+    "measuredAt": "2026-09-21T01:41:10.060Z",
+    "results": [
+      {
+        "mode": "BASIC",
+        "pieces": 100,
+        "seconds": 39.8370071,
+        "resyncs": 0,
+        "mispredicts": 0,
+        "transientReads": 7,
+        "stageUps": 3
+      },
+      {
+        "mode": "RAPID",
+        "pieces": 100,
+        "seconds": 25.929431400000002,
+        "resyncs": 3,
+        "mispredicts": 6,
+        "transientReads": 22,
+        "stageUps": 2
+      }
+    ]
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "measuredAt": "2026-09-21T01:47:32.252Z",
+  "jev": "disabled",
+  "calibration": {
+    "version": 1,
+    "scope": "ZEN",
+    "validated": true,
+    "tapHoldMs": 17,
+    "tapGapMs": 5,
+    "afterRotateMs": 10,
+    "spawnMs": 65,
+    "settleMs": 15,
+    "settleClearMs": 100,
+    "wallHoldMs": null,
+    "precharge": false,
+    "overlap": true,
+    "environment": {
+      "viewport": {
+        "w": 1295,
+        "h": 999,
+        "dpr": 2
+      },
+      "measuredAt": "2026-09-21T01:08:54.472Z",
+      "port": 9222,
+      "visualProfile": {
+        "bounciness": 0,
+        "shakiness": 0,
+        "actiontext": "off"
+      }
+    },
+    "evidence": {
+      "pieces": 120,
+      "mismatches": 0,
+      "wallLeft": 0,
+      "wallRight": 0,
+      "keys": {
+        "180": 9,
+        "left": 126,
+        "hard": 120,
+        "cw": 23,
+        "right": 164,
+        "hold": 29,
+        "ccw": 7
+      },
+      "bursts": 73,
+      "transientFrames": 0,
+      "maxVerificationMs": 199.6863000000012,
+      "overlapped": 35,
+      "seconds": 23.4736789
+    }
+  },
+  "note": "TURBO-only live segment. Prior RAPID results are recorded separately. No warmup pieces enter the measured count or time.",
+  "segments": [
+    {
+      "requestedMode": "TURBO",
+      "finalMode": "RAPID",
+      "pieces": 648,
+      "seconds": 126.20253450000001,
+      "pps": 5.134603695300588,
+      "conservativePps": 5.0870610684922495,
+      "resyncs": 2,
+      "mispredicts": 2,
+      "lines": 259,
+      "error": null,
+      "turbo": {
+        "verified": 442,
+        "fullReads": 169,
+        "boardReads": 275,
+        "mismatchWindows": 2,
+        "suspectPieces": 6,
+        "forcedResyncs": 2,
+        "inputErrors": 0,
+        "verificationLatencyMs": 378.91659999999683,
+        "effectivePps": 5.180064398704718,
+        "transientFrames": 5,
+        "stageTransitions": 0,
+        "fallbackReason": "consecutive verification mismatches",
+        "sequence": 647
+      }
+    }
+  ],
+  "visualProfile": {
+    "bounciness": 0,
+    "shakiness": 0,
+    "actiontext": "off"
+  },
+  "warmupPieces": 60,
+  "passed": false,
+  "enduranceRun": true
+}

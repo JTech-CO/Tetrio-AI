@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node src/run.js",
     "restart": "node src/run.js --restart",
-    "test": "node --test test/board.test.js test/ai.test.js"
+    "test": "node --test test/*.test.js",
+    "turbo:calibrate": "node probe/turbo_calibrate.js",
+    "turbo:validate": "node probe/validate_turbo.js"
   },
   "keywords": [],
   "author": "",

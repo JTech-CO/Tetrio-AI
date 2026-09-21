@@ -44,6 +44,8 @@ class Tetrio {
   constructor(client) {
     this.client = client;
     this.c = client; // shorthand
+    this.pressedKeys = new Set();
+    this.closing = false;
   }
 
   static async connect({ port = 9222, keepAwake = false } = {}) {
@@ -72,6 +74,8 @@ class Tetrio {
       throw e;
     }
     const t = new Tetrio(client);
+    t.targetId = page.id;
+    t.port = port;
     if (keepAwake) await t.keepCompositorAwake();
     return t;
   }
@@ -137,8 +141,10 @@ class Tetrio {
   }
 
   async keyDown(name) {
+    if (this.closing) throw new Error('CDP connection is closing');
     const k = KEYS[name];
     if (!k) throw new Error('unknown key: ' + name);
+    this.pressedKeys.add(name); // A rejected reply may still have delivered the key.
     await withTimeout(this.client.Input.dispatchKeyEvent({
       type: k.text ? 'keyDown' : 'rawKeyDown',
       key: k.key, code: k.code,
@@ -147,20 +153,43 @@ class Tetrio {
     }), 8000, 'keyDown');
   }
 
+  dispatchKeyEventFast(name, down) {
+    const k = KEYS[name];
+    if (!k) throw new Error('unknown key: ' + name);
+    return withTimeout(this.client.Input.dispatchKeyEvent({
+      type: down ? (k.text ? 'keyDown' : 'rawKeyDown') : 'keyUp',
+      key: k.key, code: k.code, windowsVirtualKeyCode: k.keyCode,
+      nativeVirtualKeyCode: k.keyCode, ...(down && k.text ? { text: k.text } : {}),
+    }), 1000, 'fast key dispatch');
+  }
+
+  async captureSession() {
+    if (!this.targetId) throw new Error('Missing CDP target identity');
+    const client = await withTimeout(CDP({ target: this.targetId, port: this.port }), 5000, 'capture attach');
+    try { await withTimeout(client.Page.enable(), 3000, 'capture Page.enable'); }
+    catch (e) { await client.close(); throw e; }
+    return new Tetrio(client);
+  }
+
   async keyUp(name) {
     const k = KEYS[name];
+    if (!k) throw new Error('unknown key: ' + name);
     await withTimeout(this.client.Input.dispatchKeyEvent({
       type: 'keyUp',
       key: k.key, code: k.code,
       windowsVirtualKeyCode: k.keyCode, nativeVirtualKeyCode: k.keyCode,
     }), 8000, 'keyUp');
+    this.pressedKeys.delete(name);
   }
 
   // One tap: keydown, short hold, keyup
   async tap(name, { holdMs = 18, gapMs = 15 } = {}) {
-    await this.keyDown(name);
-    await sleep(holdMs);
-    await this.keyUp(name);
+    try {
+      await this.keyDown(name);
+      await sleep(holdMs);
+    } finally {
+      await this.keyUp(name);
+    }
     await sleep(gapMs);
   }
 
@@ -200,7 +229,17 @@ class Tetrio {
     }
   }
 
-  async close() { await this.stopKeepAwake(); await this.client.close(); }
+  async close() {
+    if (this.closePromise) return this.closePromise;
+    this.closing = true;
+    this.closePromise = (async () => {
+      try {
+        await Promise.allSettled([...this.pressedKeys].map(name => this.keyUp(name)));
+        await this.stopKeepAwake();
+      } finally { await this.client.close(); }
+    })();
+    return this.closePromise;
+  }
 }
 
 module.exports = { Tetrio, KEYS, sleep, preciseSleep };

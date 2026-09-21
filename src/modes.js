@@ -54,12 +54,20 @@ const MODES = {
   },
 };
 
+MODES.TURBO = {
+  key: 'TURBO',
+  label: 'TURBO — 실험용 예측 실행 (입력 보정 필수, 목표 5.0+ PPS)',
+  opts: { ...MODES.RAPID.opts, predictDepth: 2, verifyEvery: 4, inputPenalty: 0.01,
+    turboFallback: 'RAPID', verifyTimeoutMs: 400, maxMismatchStreak: 2 },
+};
+
 // '1' | 'basic' | 'BASIC' -> 'BASIC'; '2' | 'rapid' -> 'RAPID'; else null.
 function resolveMode(input) {
   if (!input) return null;
   const s = String(input).trim().toUpperCase();
   if (s === '1' || s === 'B' || s === 'BASIC') return 'BASIC';
   if (s === '2' || s === 'R' || s === 'RAPID') return 'RAPID';
+  if (s === '3' || s === 'T' || s === 'TURBO') return 'TURBO';
   return MODES[s] ? s : null;
 }
 

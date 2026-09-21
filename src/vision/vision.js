@@ -120,6 +120,32 @@ class Vision {
     return filled.map((r, y) => r.map((f, x) => f ? (grid ? grid[y][x] : '#') : '.').join('')).join('\n');
   }
 
+  // ZEN's LEVEL COMPLETE effect rotates the entire field even with shake/bounce
+  // disabled. Its large bright-yellow text spans the center AND the field margins.
+  // Requiring pixels outside the field excludes ordinary O minos and yellow stacks.
+  readLevelTransition(pngBuf) {
+    const im = Buffer.isBuffer(pngBuf) ? PNG.sync.read(pngBuf) : pngBuf;
+    const cw = this.colW, step = Math.max(1, Math.floor(cw / 8));
+    const left = this.cal.fieldLeft, right = this.cal.fieldRight;
+    let count = 0, outside = 0, minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let y = Math.max(0, Math.round(this.fieldTop + 6 * cw)); y < Math.min(im.height, this.fieldTop + 13 * cw); y += step) {
+      for (let x = Math.max(0, Math.round(left - cw)); x < Math.min(im.width, right + cw); x += step) {
+        const i = (y * im.width + x) * 4;
+        const h = rgbToHsv(im.data[i], im.data[i + 1], im.data[i + 2]);
+          // The text fades to pale yellow (measured saturation ~0.45) before the
+          // board rotates away. Spatial coverage outside the field rejects O minos.
+          if (h.h < 40 || h.h > 70 || h.s < 0.35 || h.v < 0.75) continue;
+        count++;
+        if (x < left || x > right) outside++;
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      }
+    }
+    const samplesPerCell = (cw / step) ** 2;
+    return count >= samplesPerCell * 2 && outside >= Math.max(4, samplesPerCell * 0.1) &&
+      maxX - minX >= cw * 7 && maxY - minY >= cw * 1.5;
+  }
+
   // Identify a single piece inside a rectangular region. Builds a coarse saturated mask,
   // isolates the LARGEST connected blob (rejecting stray nebula pixels), quantizes it to a
   // grid at the local cell size, and shape-matches. Returns letter|null.
@@ -188,6 +214,14 @@ class Vision {
   }
 
   // Read the HOLD piece. Returns letter|null (null = empty hold).
+  readSpawnPiece(pngBuf) {
+    const png = Buffer.isBuffer(pngBuf) ? PNG.sync.read(pngBuf) : pngBuf;
+    // ZEN can keep a fresh piece entirely ABOVE the visible 20 rows after a
+    // level transition. Do not mistake an absent visible piece for a stuck game.
+    return this._readPieceInRegion(png, this.cal.fieldLeft + 2.5 * this.colW,
+      this.cal.fieldLeft + 7.5 * this.colW, this.fieldTop - 2.5 * this.colW, this.fieldTop);
+  }
+
   readHold(pngBuf) {
     const png = Buffer.isBuffer(pngBuf) ? PNG.sync.read(pngBuf) : pngBuf;
     return this._readPieceInRegion(png, this.hold.x0, this.hold.x1, this.hold.y0, this.hold.y1);

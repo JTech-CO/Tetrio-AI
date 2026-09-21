@@ -32,15 +32,25 @@ function parseArgs(argv) {
               postdrop: null, mode: 'BASIC', restartEvery: 2500, restartMins: 20 };
   for (let i = 2; i < argv.length; i++) {
     const k = argv[i];
-    if (k === '--port') a.port = parseInt(argv[++i], 10);
-    else if (k === '--pieces') a.pieces = parseInt(argv[++i], 10);
-    else if (k === '--restart') a.restart = true;
-    else if (k === '--no-adblock') a.adblock = false;
-    else if (k === '--quality') a.quality = parseInt(argv[++i], 10);
-    else if (k === '--postdrop') a.postdrop = parseInt(argv[++i], 10); // lower = faster, ~120 min
-    else if (k === '--mode') a.mode = resolveMode(argv[++i]) || 'BASIC';
-    else if (k === '--restart-every') a.restartEvery = parseInt(argv[++i], 10); // 0 disables
-    else if (k === '--restart-mins') a.restartMins = parseInt(argv[++i], 10);    // 0 disables
+    if (k === '--restart') { a.restart = true; continue; }
+    if (k === '--no-adblock') { a.adblock = false; continue; }
+    const fields = { '--port': ['port', 1, 65535], '--pieces': ['pieces', 1, Number.MAX_SAFE_INTEGER],
+      '--quality': ['quality', 1, 100], '--postdrop': ['postdrop', 0, Number.MAX_SAFE_INTEGER],
+      '--restart-every': ['restartEvery', 0, Number.MAX_SAFE_INTEGER],
+      '--restart-mins': ['restartMins', 0, Number.MAX_SAFE_INTEGER] };
+    if (!fields[k] && k !== '--mode' && k !== '--calibration') throw new Error('Unknown option: ' + k);
+    const value = argv[++i];
+    if (!value || value.startsWith('--')) throw new Error('Missing value for ' + k);
+    if (k === '--mode') {
+      a.mode = resolveMode(value);
+      if (!a.mode) throw new Error('Unknown mode: ' + value);
+    } else if (k === '--calibration') a.calibrationPath = value;
+    else {
+      const [field, min, max] = fields[k], n = Number(value);
+      if (!Number.isFinite(n) || n < min || n > max ||
+          (field !== 'restartMins' && !Number.isSafeInteger(n))) throw new Error('Invalid value for ' + k + ': ' + value);
+      a[field] = n;
+    }
   }
   return a;
 }
@@ -98,10 +108,11 @@ function printModeMenu(current) {
 
 async function main() {
   const args = parseArgs(process.argv);
+  if (args.mode === 'TURBO') require('./input/calibration').loadCalibration(args.calibrationPath);
   console.log(`▶ TETR.IO ZEN 봇 시작 (port=${args.port}, pieces=${args.pieces === Infinity ? '∞' : args.pieces})`);
 
   const t0 = Date.now();
-  let stop = false;
+  let stop = false, exitCode = 0;
   let totalPieces = 0, totalLines = 0, totalStageUps = 0, totalResyncs = 0, totalMispredicts = 0;
   let currentBot = null;
   let activeT = null;         // the live CDP connection, visible to shutdown() BEFORE a bot
@@ -128,10 +139,13 @@ async function main() {
 
   // Apply a mode to the running bot (re-applies an explicit --postdrop override on top).
   const applyMode = (name) => {
+    if (name === 'TURBO') {
+      try { require('./input/calibration').loadCalibration(args.calibrationPath); }
+      catch (e) { console.warn(e.message); return; }
+    }
     modeName = name;
     if (currentBot) {
       currentBot.setMode(name);
-      if (args.postdrop) currentBot.opts.postDropMs = Math.max(90, args.postdrop);
     }
     recentTimes = [];
     console.log(`⇒ 모드 전환: ${MODES[name].label}`);
@@ -144,7 +158,16 @@ async function main() {
   let shuttingDown = false;
   const shutdown = async (code = 0) => {
     if (shuttingDown) return; shuttingDown = true; stop = true;
-    if (currentBot) currentBot.stop = true;
+    if (currentBot) {
+      currentBot.stop = true;
+      if (currentBot.inputExecutor) {
+        currentBot.inputExecutor.cancel();
+        try { await currentBot.inputExecutor.releaseAll(); } catch (e) { console.error(e.message); }
+      }
+      if (currentBot.turboVisual) {
+        try { await currentBot.turboVisual.restore(); } catch (e) { console.error(e.message); }
+      }
+    }
     try { rl.close(); } catch {}
     try { const tt = (currentBot && currentBot.t) || activeT; if (tt) await tt.close(); } catch {}
     console.log(`\n⏹ 종료: ${summary()}`);
@@ -170,7 +193,7 @@ async function main() {
     } else if (cmd.toLowerCase() === 'status') {
       console.log('  ' + summary());
     } else {
-      console.log('  ? 명령: 1|basic, 2|rapid, status');
+      console.log('  ? 명령: 1|basic, 2|rapid, 3|turbo, status');
     }
   });
   rl.on('SIGINT', () => shutdown(0));
@@ -226,7 +249,7 @@ async function main() {
         if (reachFailStreak >= 8) {
           console.log('  ✖ ZEN 진입을 여러 번 재시도했으나 실패했습니다. 앱이 차단/오류 화면에 '
             + '머물러 있을 수 있으니, TETR.IO에서 직접 Solo → ZEN에 진입한 뒤 다시 실행해 주세요.');
-          break;
+          exitCode = 1; break;
         }
         console.log(`  ↻ ZEN 진입 실패 — 앱을 재시작해 재시도합니다 (${reachFailStreak}/8)`);
         degradedDue = true; // force a clean restart next iteration
@@ -244,13 +267,20 @@ async function main() {
       }
       console.log(`  ▶ 플레이 시작 — 모드: ${MODES[modeName].label}`);
 
-      const botOpts = { ...MODES[modeName].opts, mode: modeName, jpegQuality: args.quality };
-      if (args.postdrop) botOpts.postDropMs = Math.max(90, args.postdrop);
+      if (modeName === 'TURBO') {
+        try { require('./input/calibration').loadCalibration(args.calibrationPath); }
+        catch (e) { console.warn(e.message); modeName = 'RAPID'; }
+      }
+      const botOpts = { ...MODES[modeName].opts, mode: modeName, jpegQuality: args.quality,
+        calibrationPath: args.calibrationPath };
+      if (args.postdrop !== null) {
+        botOpts.postDropMs = Math.max(90, args.postdrop);
+        botOpts.modeOverrides = { postDropMs: botOpts.postDropMs };
+      }
       const bot = new ZenBot(t, botOpts);
       currentBot = bot;
       await bot.calibrate();
       console.log('  ✓ 필드 보정 완료:', JSON.stringify(bot.absCal));
-      consecutiveFailures = 0;
 
       const base = totalPieces;
       const remaining = args.pieces - totalPieces;
@@ -261,7 +291,12 @@ async function main() {
         maxMs: segMs,
         onTurn: (r) => {
           if (r.idleWarning) { console.log(`  … 피스 미검출 (일시정지/탑아웃?) — 대기 중`); return; }
+          consecutiveFailures = 0; // Recovery succeeded only once play makes progress.
           noteTurn();
+          modeName = bot.mode;
+          if (r.turbo && r.piecesPlaced % 20 === 0) {
+            console.log(`  TURBO 실효 ${r.turbo.effectivePps.toFixed(2)} PPS | 검증 ${r.turbo.verificationLatencyMs.toFixed(0)}ms | 의심 피스 상한 ${r.turbo.suspectPieces}`);
+          }
           if ((base + r.piecesPlaced) % 20 === 0) {
             const secs = (Date.now() - t0) / 1000;
             const recent = recentPps();
@@ -293,26 +328,26 @@ async function main() {
       try { if (t) await t.close(); } catch {}
       activeT = null;
       if (e && e.degraded) {
-        degradedDue = true; consecutiveFailures = 0; // known cause; restart immediately, don't escalate
+        degradedDue = true; // Restart immediately, but repeated no-progress degradation is still fatal.
         console.log(`  ⚠ 렌더러 열화 감지 — 앱 재시작으로 복구: ${e.message}`);
-      } else {
-        consecutiveFailures++;
-        // Give up after many consecutive UNRECOVERABLE errors (e.g. a stuck single-instance
-        // lock that no restart can clear) instead of spamming "복구 시도" every 2s forever.
-        if (consecutiveFailures >= 8) {
-          console.log(`  ✖ 복구 불가(연속 ${consecutiveFailures}회): ${e.message}`);
-          console.log('     작업 관리자에서 TETR.IO.exe를 모두 종료하고, 그래도 안 되면 PC를 재부팅한 뒤 다시 실행해 주세요.');
-          break;
-        }
-        console.log(`  ⚠ 오류(${consecutiveFailures}/8회) — 복구 시도: ${e.message}`);
       }
+      consecutiveFailures++;
+      // Give up after many consecutive UNRECOVERABLE errors (e.g. a stuck single-instance
+      // lock that no restart can clear) instead of spamming "복구 시도" every 2s forever.
+      if (consecutiveFailures >= 8) {
+        console.log(`  ✖ 복구 불가(연속 ${consecutiveFailures}회): ${e.message}`);
+        console.log('     작업 관리자에서 TETR.IO.exe를 모두 종료하고, 그래도 안 되면 PC를 재부팅한 뒤 다시 실행해 주세요.');
+        exitCode = 1; break;
+      }
+      console.log(`  ⚠ 오류(${consecutiveFailures}/8회) — 복구 시도: ${e.message}`);
       if (stop) break;
       await sleep(2000);
     }
   }
   try { rl.close(); } catch {}
   console.log(`\n⏹ 종료: ${summary()}`);
-  process.exit(0);
+  process.exit(exitCode);
 }
 
-main().catch((e) => { console.error('치명적 오류:', e); process.exit(1); });
+if (require.main === module) main().catch((e) => { console.error('치명적 오류:', e); process.exit(1); });
+module.exports = { parseArgs };

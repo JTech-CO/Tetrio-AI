@@ -9,6 +9,7 @@ const { Vision } = require('./vision/vision.js');
 const { extractCurrentPiece } = require('./vision/pieces.js');
 const { Board } = require('./board.js');
 const { pickMove } = require('./ai.js');
+const { knownQueue } = require('./state.js');
 
 const DEFAULTS = {
   // BASIC-mode values (see src/modes.js for the presets). Tuned on live ZEN (sweep):
@@ -37,6 +38,7 @@ class ZenBot {
   constructor(t, opts = {}) {
     this.t = t;
     this.opts = { ...DEFAULTS, ...opts };
+    this.modeOverrides = { ...(opts.modeOverrides || {}) };
     this.vision = null;
     this.cal = null;
     this.piecesPlaced = 0;
@@ -49,6 +51,7 @@ class ZenBot {
     this.stageStableFrames = 0;
     this.mode = opts.mode || 'BASIC';
     this.mispredicts = 0;      // turns where the screen didn't match the previous prediction
+    this.transientReads = 0;   // mismatching frames discarded before deciding the next move
     this.lastPredicted = null; // 20x10 matrix predicted by the previous placement
   }
 
@@ -57,26 +60,42 @@ class ZenBot {
     const { MODES } = require('./modes.js');
     const m = MODES[name && String(name).toUpperCase()];
     if (!m) return null;
-    Object.assign(this.opts, m.opts);
+    if (m.key === 'TURBO') {
+      require('./input/calibration').loadCalibration(this.opts.calibrationPath);
+    }
+    if (this.running) { this.pendingMode = m.key; return m; }
+    // Remove mode-only values when returning from TURBO/RAPID to BASIC.
+    for (const preset of Object.values(MODES)) {
+      for (const key of Object.keys(preset.opts)) delete this.opts[key];
+    }
+    for (const [key, value] of Object.entries(DEFAULTS)) {
+      if (!(key in this.opts)) this.opts[key] = value;
+    }
+    Object.assign(this.opts, m.opts, this.modeOverrides);
     this.mode = m.key;
     return m;
   }
 
   static async launch(opts = {}) {
     const t = await Tetrio.connect(opts);
-    await applyFocusSpoof(t);
-    await applyAdblock(t);
-    try { await applyCosmetics(t); await sweepAds(t); } catch (e) {}
-    const bot = new ZenBot(t, opts);
-    await bot.calibrate();
-    return bot;
+    try {
+      await applyFocusSpoof(t);
+      await applyAdblock(t);
+      try { await applyCosmetics(t); await sweepAds(t); } catch (e) {}
+      const bot = new ZenBot(t, opts);
+      await bot.calibrate();
+      return bot;
+    } catch (e) {
+      try { await t.close(); } catch {}
+      throw e;
+    }
   }
 
   // Calibrate from a full PNG frame-detect, then set up a tight JPEG clip around the
   // play area (HOLD..NEXT, top..stage) so the per-turn capture+decode stays fast.
   async calibrate() {
     // Retry a few times — a transient bad frame (ad still fading, mid-refresh) can defeat
-    // detection; only fall back to the default calibration after several failures.
+    // detection; do not invent coordinates if no frame has ever been calibrated.
     let abs = null, lastErr = null;
     for (let attempt = 0; attempt < 5 && !abs; attempt++) {
       try { abs = Vision.detectFrame(await this.t.screenshot()); }
@@ -90,8 +109,7 @@ class ZenBot {
         console.warn('[calibrate] frame detect failed, keeping previous calibration:', lastErr && lastErr.message);
         return this.cal;
       }
-      console.warn('[calibrate] frame detect failed, using default:', lastErr && lastErr.message);
-      abs = { ...require('./vision/vision.js').DEFAULT_CAL };
+      throw new Error('Field calibration failed: ' + (lastErr && lastErr.message));
     }
     // Renderer-degradation guard. Over very long sessions the app's render resolution can
     // collapse (the game content shrinks inside an unchanged window — TETR.IO/Chromium
@@ -118,7 +136,7 @@ class ZenBot {
     // Device-pixel bounds of everything we read.
     const xMinD = Math.max(0, Math.floor(abs.fieldLeft - 5.6 * cw));
     const xMaxD = Math.min(abs.screenshotW, Math.ceil(abs.fieldRight + 7.2 * cw));
-    const yMinD = Math.max(0, Math.floor(fieldTop - 1.2 * cw));
+    const yMinD = Math.max(0, Math.floor(fieldTop - 2.5 * cw));
     const yMaxD = Math.min(abs.screenshotH, Math.ceil(abs.fieldBottom + 2.8 * cw));
     // Downscale the per-turn capture so the decoded image size (and decode time) is
     // independent of the window size: target ~TARGET_CELL device px per cell. Chrome's clip
@@ -151,6 +169,12 @@ class ZenBot {
   //  -> { filled, grid, current, currentCells, partial, stackFilled, queue, hold, hasPiece }
   async readState(buf) {
     if (!buf) buf = await this.grab();
+    if (this.vision.readLevelTransition?.(buf)) {
+      this.current = null;
+      this.lastPredicted = null;
+      return { buf, current: null, hasPiece: false, queue: [], hold: null,
+        stackFilled: Array.from({ length: 20 }, () => Array(10).fill(false)), transition: true };
+    }
     const { filled, grid } = this.vision.readBoard(buf);
     const { piece, stackFilled } = extractCurrentPiece(filled);
     const queue = this.vision.readQueue(buf);
@@ -162,20 +186,20 @@ class ZenBot {
     try {
       const fp = this.vision.stageFingerprint(buf);
       if (this.lastStageSig) {
-        if (Vision.stageChanged(this.lastStageSig, fp)) {
+        if (!Vision.stageChanged(this.lastStageSig, fp)) {
+          this.stagePendingSig = null; this.stageStableFrames = 0;
+        } else if (!this.stagePendingSig || Vision.stageChanged(this.stagePendingSig, fp)) {
           this.stagePendingSig = fp; this.stageStableFrames = 0;
-        } else if (this.stagePendingSig && !Vision.stageChanged(this.stagePendingSig, fp)) {
+        } else {
           // pending change persisting
           if (++this.stageStableFrames === 2) { this.stageUps++; this.lastStageSig = fp; this.stagePendingSig = null; }
-        } else {
-          this.lastStageSig = fp; // stable, no pending change
         }
       } else {
         this.lastStageSig = fp;
       }
     } catch (e) {}
 
-    const boardLetter = piece && piece.letter ? piece.letter : null;
+    const boardLetter = piece?.letter || this.vision.readSpawnPiece?.(buf) || null;
     let current = this.current;
     if (boardLetter) {
       if (current && current !== boardLetter) this.resyncs++; // tracking drifted; trust the screen
@@ -190,7 +214,7 @@ class ZenBot {
       currentCells: piece ? piece.cells : null,
       partial: piece ? piece.partial : false,
       stackFilled, queue, hold,
-      hasPiece: piece !== null,
+      hasPiece: piece !== null || !!boardLetter,
     };
   }
 
@@ -209,20 +233,24 @@ class ZenBot {
       // up to ~15.6ms, which alone costs ~15ms per tap. With real timing the floors are:
       // hold >=~17 (span a 60fps frame), gap >=~5 (gap 1 -> ~30% dropped taps, measured).
       for (let i = 0; i < keys.length; i++) {
+        if (this.stop) return false;
         const k = keys[i];
-        await this.t.keyDown(k);
-        await preciseSleep(o.tapHoldMs);
-        await this.t.keyUp(k);
+        try {
+          await this.t.keyDown(k);
+          await preciseSleep(o.tapHoldMs);
+        } finally { await this.t.keyUp(k); }
         if (i === keys.length - 1) break; // no trailing gap — postDrop covers it
         await preciseSleep(o.tapGapMs);
         if (k === 'cw' || k === 'ccw' || k === '180' || k === 'hold') await preciseSleep(o.afterRotateMs);
       }
-      return;
+      return true;
     }
     for (const k of keys) {
+      if (this.stop) return false;
       await this.t.tap(k, { holdMs: o.tapHoldMs, gapMs: o.tapGapMs });
       if (k === 'cw' || k === 'ccw' || k === '180' || k === 'hold') await sleep(o.afterRotateMs);
     }
+    return true;
   }
 
   // Play a single piece. If verify=true, returns { predicted, actualStack, match }.
@@ -232,13 +260,14 @@ class ZenBot {
       return { skipped: true, reason: 'no current piece detected' };
     }
     const sim = Board.fromMatrix(st.stackFilled);
-    const queueBefore = st.queue.filter(Boolean);
+    const queueBefore = knownQueue(st.queue);
+    if (queueBefore.length < 2) return { skipped: true, reason: 'NEXT prefix incomplete' };
     const holdBefore = st.hold;
     const mv = pickMove({ board: sim, current: st.current, queue: queueBefore, hold: holdBefore, canHold: true });
     if (!mv) return { skipped: true, reason: 'pickMove returned null (topout?)' };
 
     const predicted = mv.expectedResult.board; // Board after placement (stack incl. clears)
-    await this.runKeys(mv.keys);
+    if (await this.runKeys(mv.keys) === false) return { skipped: true, reason: 'stopped' };
     await sleep(this.opts.postDropMs);
     this.piecesPlaced++;
     this.linesEstimate += mv.expectedResult.linesCleared;
@@ -263,109 +292,143 @@ class ZenBot {
   // maxMs: stop the segment after this wall-clock budget so the supervisor can do a
   // proactive "pit-stop" restart that refreshes the renderer before it degrades.
   async run({ maxPieces = Infinity, maxMs = Infinity, onTurn = null } = {}) {
+    const start = Date.now();
+    this.running = true;
+    try {
+      while (!this.stop && this.piecesPlaced < maxPieces && Date.now() - start < maxMs) {
+        if (this.pendingMode) {
+          const next = this.pendingMode; this.pendingMode = null;
+          this.running = false;
+          try { this.setMode(next); } finally { this.running = true; }
+        }
+        const options = { maxPieces, maxMs: Math.max(0, maxMs - (Date.now() - start)), onTurn };
+        if (this.mode === 'TURBO') await require('./turbo').runTurbo(this, options);
+        else await this.runLegacy(options);
+        if (!this.pendingMode) break;
+      }
+    } finally { this.running = false; }
+  }
+
+  async runLegacy({ maxPieces = Infinity, maxMs = Infinity, onTurn = null } = {}) {
     let idle = 0, lastRecal = 0, lastSweep = Date.now();
     const runStart = Date.now();
     let idleSince = 0; // wall-clock start of the CURRENT continuous no-piece stretch (0 = playing)
     const IDLE_MAX_MS = 60000; // independent deadline: a stuck no-piece screen throws -> restart
     let pending = null; // RAPID: pipelined read promise, captured during the postDrop wait
-    while (!this.stop && this.piecesPlaced < maxPieces && Date.now() - runStart < maxMs) {
-      if (this.piecesPlaced > 0 && this.piecesPlaced - lastRecal >= this.opts.recalibrateEvery) {
-        if (pending) { try { await pending; } catch (e) {} pending = null; } // used the old cal — discard
-        await this.calibrate(); lastRecal = this.piecesPlaced;
-      }
-      // Periodically remove accumulating ad iframes (they crash the renderer over time).
-      // Fire-and-forget: DOM cleanup latency (~30-100ms) must not stall the play loop.
-      if (Date.now() - lastSweep >= this.opts.sweepEveryMs) {
-        lastSweep = Date.now();
-        try { sweepAds(this.t).catch(() => {}); } catch (e) {}
-      }
-      // Clean stack + queue + hold; current = tracked|visible. In RAPID the read AND the
-      // move computation already ran during the previous piece's postDrop wait
-      // (null on failure -> fresh read here).
-      let st = null, mv = null, mvReady = false;
-      if (pending) {
-        const p = await pending; pending = null;
-        if (p && p.st) { st = p.st; mv = p.mv; mvReady = p.mvReady; }
-      }
-      if (!st) st = await this.readState();
-      // Prediction check: does the screen match what the previous placement predicted?
-      // A mismatch = a misplacement (dropped/early keys) or a mid-animation misread; either
-      // way this read replaces the sim, so it self-corrects — but count it for tuning.
-      if (this.lastPredicted) {
-        const actual = st.stackFilled.map(r => r.map(Boolean));
-        if (!matricesEqual(this.lastPredicted.slice(4), actual.slice(4))) this.mispredicts++;
-        this.lastPredicted = null;
-      }
-      const cur = st.current;
-      if (!cur) { // no tracking yet and no visible piece — wait to (re)bootstrap
-        idle++;
-        if (!idleSince) idleSince = Date.now();
-        // Independent liveness deadline: if we can't read a piece for this long straight, the
-        // screen is stuck in a way per-turn reads won't fix (a warm-but-unreadable overlay,
-        // shrunken content that still passes detectFrame, etc.) — throw so the supervisor
-        // restarts. This does NOT rely on the caller's maxMs (which may be disabled).
-        if (Date.now() - idleSince > IDLE_MAX_MS) {
-          throw new Error(`IDLE: ${Math.round((Date.now() - idleSince) / 1000)}초간 피스를 읽지 못함 — 앱 재시작 필요`);
+    try {
+      while (!this.stop && this.piecesPlaced < maxPieces && Date.now() - runStart < maxMs) {
+        if (this.pendingMode) break;
+        if (this.piecesPlaced > 0 && this.piecesPlaced - lastRecal >= this.opts.recalibrateEvery) {
+          if (pending) { try { await pending; } catch (e) {} pending = null; } // used the old cal — discard
+          await this.calibrate(); lastRecal = this.piecesPlaced;
         }
-        if (idle > 60) {
-          if (onTurn) onTurn({ idleWarning: true, piecesPlaced: this.piecesPlaced });
-          // Prolonged idling often means the calibration went stale (window resized,
-          // animation during the last recalibrate). Self-heal with a fresh attempt — but a
-          // {degraded} verdict must PROPAGATE (don't swallow it, or a real shrink would only
-          // restart at the segment time-cap, up to ~20 min late).
-          try { await this.calibrate(); lastRecal = this.piecesPlaced; }
-          catch (e) { if (e && e.degraded) throw e; }
-          idle = 0;
+        // Periodically remove accumulating ad iframes (they crash the renderer over time).
+        // Fire-and-forget: DOM cleanup latency (~30-100ms) must not stall the play loop.
+        if (Date.now() - lastSweep >= this.opts.sweepEveryMs) {
+          lastSweep = Date.now();
+          try { sweepAds(this.t).catch(() => {}); } catch (e) {}
         }
-        await sleep(this.opts.idleSleepMs);
-        continue;
-      }
-      idle = 0; idleSince = 0;
-      const queueBefore = st.queue.filter(Boolean);
-      const holdBefore = st.hold;
-      if (!mvReady) {
-        const sim = Board.fromMatrix(st.stackFilled);
-        mv = pickMove({ board: sim, current: cur, queue: queueBefore, hold: holdBefore,
-                        canHold: true, keyPenalty: this.opts.keyPenalty || 0, beam: this.opts.aiBeam || 0 });
-      }
-      if (!mv) { await sleep(120); continue; } // topout/blocked — let the field settle
-      await this.runKeys(mv.keys);
-      this.piecesPlaced++;
-      this.linesEstimate += mv.expectedResult.linesCleared;
-      this.advanceCurrent(queueBefore, mv.useHold, holdBefore);
-      this.lastPredicted = boardToVisibleMatrix(mv.expectedResult.board);
-      if (onTurn) onTurn({ mv, piecesPlaced: this.piecesPlaced, linesEstimate: this.linesEstimate,
-                           stageUps: this.stageUps, resyncs: this.resyncs, mispredicts: this.mispredicts });
-      if (this.opts.pipelineRead) {
-        // RAPID: run the board capture AND the next move computation DURING the
-        // spawn-margin wait instead of after it, taking read (~60ms) + pickMove (~35ms)
-        // off the critical path. Wait a short settle first so the locked stack is
-        // rendered — longer when this drop cleared lines, so the clear animation has
-        // collapsed before we look. Errors resolve to null (fresh read next iteration);
-        // the catch is inside the async fn so nothing rejects unhandled.
-        const settle = mv.expectedResult.linesCleared > 0 ? this.opts.settleClearMs : this.opts.settleMs;
-        pending = (async () => {
-          try {
-            await sleep(settle);
-            const st2 = await this.readState();
-            let mv2 = null, ready = false;
+        // Clean stack + queue + hold; current = tracked|visible. In RAPID the read AND the
+        // move computation already ran during the previous piece's postDrop wait
+        // (null on failure -> fresh read here).
+        let st = null, mv = null, mvReady = false;
+        if (pending) {
+          const p = await pending; pending = null;
+          if (p && p.st) { st = p.st; mv = p.mv; mvReady = p.mvReady; }
+        }
+        if (!st) st = await this.readState();
+        // Prediction check: does the screen match what the previous placement predicted?
+        // A mismatch may be an animated frame. Reobserve before acting and discard any
+        // move already computed from that frame. Persistent drift still uses the real board.
+        if (this.lastPredicted) {
+          const predicted = this.lastPredicted;
+          for (let retry = 0; !st.transition && !this.stop; retry++) {
+            const actual = st.stackFilled.map(r => r.map(Boolean));
+            if (matricesEqual(predicted.slice(4), actual.slice(4))) break;
+            if (retry === 2) { this.mispredicts++; break; }
+            this.transientReads++;
+            await sleep(34);
+            st = await this.readState(); mvReady = false;
+          }
+          this.lastPredicted = null;
+        }
+        const cur = st.current;
+        const queueBefore = knownQueue(st.queue);
+        if (!cur || queueBefore.length < 2) { // wait for a trustworthy current/NEXT prefix
+          idle++;
+          if (!idleSince) idleSince = Date.now();
+          // Independent liveness deadline: if we can't read a piece for this long straight, the
+          // screen is stuck in a way per-turn reads won't fix (a warm-but-unreadable overlay,
+          // shrunken content that still passes detectFrame, etc.) — throw so the supervisor
+          // restarts. This does NOT rely on the caller's maxMs (which may be disabled).
+          if (Date.now() - idleSince > IDLE_MAX_MS) {
+            throw new Error(`IDLE: ${Math.round((Date.now() - idleSince) / 1000)}초간 피스를 읽지 못함 — 앱 재시작 필요`);
+          }
+          if (idle > 60) {
+            if (onTurn) onTurn({ idleWarning: true, piecesPlaced: this.piecesPlaced });
+            // Prolonged idling often means the calibration went stale (window resized,
+            // animation during the last recalibrate). Self-heal with a fresh attempt — but a
+            // {degraded} verdict must PROPAGATE (don't swallow it, or a real shrink would only
+            // restart at the segment time-cap, up to ~20 min late).
+            try { await this.calibrate(); lastRecal = this.piecesPlaced; }
+            catch (e) { if (e && e.degraded) throw e; }
+            idle = 0;
+          }
+          await sleep(this.opts.idleSleepMs);
+          continue;
+        }
+        idle = 0;
+        const holdBefore = st.hold;
+        if (!mvReady) {
+          const sim = Board.fromMatrix(st.stackFilled);
+          mv = pickMove({ board: sim, current: cur, queue: queueBefore, hold: holdBefore,
+                          canHold: true, keyPenalty: this.opts.keyPenalty || 0, beam: this.opts.aiBeam || 0 });
+        }
+        if (!mv) {
+          if (!idleSince) idleSince = Date.now();
+          if (Date.now() - idleSince > IDLE_MAX_MS) throw new Error('IDLE: no executable placement');
+          await sleep(120); continue;
+        }
+        idleSince = 0;
+        if (await this.runKeys(mv.keys) === false) break;
+        this.piecesPlaced++;
+        this.linesEstimate += mv.expectedResult.linesCleared;
+        this.advanceCurrent(queueBefore, mv.useHold, holdBefore);
+        this.lastPredicted = boardToVisibleMatrix(mv.expectedResult.board);
+        if (onTurn) onTurn({ mv, piecesPlaced: this.piecesPlaced, linesEstimate: this.linesEstimate,
+                             stageUps: this.stageUps, resyncs: this.resyncs, mispredicts: this.mispredicts });
+        if (this.opts.pipelineRead) {
+          // RAPID: run the board capture AND the next move computation DURING the
+          // spawn-margin wait instead of after it, taking read (~60ms) + pickMove (~35ms)
+          // off the critical path. Wait a short settle first so the locked stack is
+          // rendered — longer when this drop cleared lines, so the clear animation has
+          // collapsed before we look. Errors resolve to null (fresh read next iteration);
+          // the catch is inside the async fn so nothing rejects unhandled.
+          const settle = mv.expectedResult.linesCleared > 0 ? this.opts.settleClearMs : this.opts.settleMs;
+          pending = (async () => {
             try {
-              if (st2 && st2.current) {
-                mv2 = pickMove({ board: Board.fromMatrix(st2.stackFilled), current: st2.current,
-                                 queue: st2.queue.filter(Boolean), hold: st2.hold,
-                                 canHold: true, keyPenalty: this.opts.keyPenalty || 0, beam: this.opts.aiBeam || 0 });
-                ready = true; // mv2===null with ready=true means a real topout verdict
-              }
-            } catch (e) {}
-            return { st: st2, mv: mv2, mvReady: ready };
-          } catch (e) { return null; }
-        })();
-        await sleep(this.opts.postDropMs);
-      } else {
-        await sleep(this.opts.postDropMs); // let the piece lock + the next piece become controllable
+              await sleep(settle);
+              const st2 = await this.readState();
+              let mv2 = null, ready = false;
+              try {
+                if (st2 && st2.current && knownQueue(st2.queue).length >= 2) {
+                  mv2 = pickMove({ board: Board.fromMatrix(st2.stackFilled), current: st2.current,
+                                   queue: knownQueue(st2.queue), hold: st2.hold,
+                                   canHold: true, keyPenalty: this.opts.keyPenalty || 0, beam: this.opts.aiBeam || 0 });
+                  ready = true; // mv2===null with ready=true means a real topout verdict
+                }
+              } catch (e) {}
+              return { st: st2, mv: mv2, mvReady: ready };
+            } catch (e) { return null; }
+          })();
+          await sleep(this.opts.postDropMs);
+        } else {
+          await sleep(this.opts.postDropMs); // let the piece lock + the next piece become controllable
+        }
       }
+    } finally {
+      if (pending) { try { await pending; } catch (e) {} } // don't leave a capture in flight
     }
-    if (pending) { try { await pending; } catch (e) {} } // don't leave a capture in flight
   }
 }
 

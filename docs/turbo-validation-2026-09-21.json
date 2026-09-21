@@ -1,0 +1,86 @@
+{
+  "measuredAt": "2026-09-21T00:37:23.605Z",
+  "jev": "disabled",
+  "calibration": {
+    "version": 1,
+    "scope": "ZEN",
+    "validated": true,
+    "tapHoldMs": 17,
+    "tapGapMs": 5,
+    "afterRotateMs": 10,
+    "spawnMs": 120,
+    "settleMs": 15,
+    "settleClearMs": 100,
+    "wallHoldMs": null,
+    "precharge": false,
+    "overlap": false,
+    "environment": {
+      "viewport": {
+        "w": 1295,
+        "h": 999,
+        "dpr": 2
+      },
+      "measuredAt": "2026-09-21T00:34:12.717Z",
+      "port": 9222
+    },
+    "evidence": {
+      "pieces": 120,
+      "mismatches": 0,
+      "wallLeft": 0,
+      "wallRight": 0,
+      "keys": {
+        "180": 9,
+        "hold": 29,
+        "cw": 29,
+        "right": 171,
+        "hard": 120,
+        "left": 136,
+        "ccw": 9
+      },
+      "bursts": 71,
+      "transientFrames": 1,
+      "maxVerificationMs": 144.72919999999976,
+      "seconds": 31.3867019
+    }
+  },
+  "note": "Sequential live segments; independent bags/boards, not identical-input A/B. Input counts are estimates; sparse mismatch windows count all affected pieces as suspect.",
+  "segments": [
+    {
+      "requestedMode": "RAPID",
+      "finalMode": "RAPID",
+      "pieces": 500,
+      "seconds": 140.7401508,
+      "pps": 3.5526464705194845,
+      "resyncs": 0,
+      "mispredicts": 32,
+      "lines": 194,
+      "turbo": null
+    },
+    {
+      "requestedMode": "TURBO",
+      "finalMode": "RAPID",
+      "pieces": 500,
+      "seconds": 131.4239213,
+      "pps": 3.8044824340513728,
+      "resyncs": 1,
+      "mispredicts": 30,
+      "lines": 202,
+      "turbo": {
+        "verified": 129,
+        "fullReads": 43,
+        "boardReads": 87,
+        "mismatchWindows": 1,
+        "suspectPieces": 1,
+        "forcedResyncs": 1,
+        "inputErrors": 0,
+        "verificationLatencyMs": 348.65669999999227,
+        "effectivePps": 3.857022099227262,
+        "transientFrames": 5,
+        "fallbackReason": "high stack requires RAPID observation",
+        "sequence": 173
+      }
+    }
+  ],
+  "passed": false,
+  "enduranceRun": false
+}
