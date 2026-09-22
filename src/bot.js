@@ -199,7 +199,11 @@ class ZenBot {
       }
     } catch (e) {}
 
-    const boardLetter = piece?.letter || this.vision.readSpawnPiece?.(buf) || null;
+    // Only a CLEAN 4-cell in-field read may override tracking. The spawn strip cuts the piece
+    // at the field boundary, and at RAPID's ~17px capture cells a clipped piece quantizes to a
+    // different tetromino (measured: J read as I), so it may only BOOTSTRAP a missing identity.
+    const boardLetter = piece?.letter
+      || (this.current ? null : this.vision.readSpawnPiece?.(buf)) || null;
     let current = this.current;
     if (boardLetter) {
       if (current && current !== boardLetter) this.resyncs++; // tracking drifted; trust the screen
@@ -261,9 +265,10 @@ class ZenBot {
     }
     const sim = Board.fromMatrix(st.stackFilled);
     const queueBefore = knownQueue(st.queue);
-    if (queueBefore.length < 2) return { skipped: true, reason: 'NEXT prefix incomplete' };
+    if (!queueBefore.length) return { skipped: true, reason: 'NEXT prefix incomplete' };
     const holdBefore = st.hold;
-    const mv = pickMove({ board: sim, current: st.current, queue: queueBefore, hold: holdBefore, canHold: true });
+    const mv = pickMove({ board: sim, current: st.current, queue: queueBefore, hold: holdBefore,
+                          canHold: holdBefore ? true : queueBefore.length >= 2 });
     if (!mv) return { skipped: true, reason: 'pickMove returned null (topout?)' };
 
     const predicted = mv.expectedResult.board; // Board after placement (stack incl. clears)
@@ -338,23 +343,24 @@ class ZenBot {
         }
         if (!st) st = await this.readState();
         // Prediction check: does the screen match what the previous placement predicted?
-        // A mismatch may be an animated frame. Reobserve before acting and discard any
-        // move already computed from that frame. Persistent drift still uses the real board.
+        // A mismatch may be a half-rendered frame — the pipelined read fires only settleMs after
+        // the drop — so reobserve ONCE and discard any move computed from that frame. The re-read
+        // is itself ~60ms of settling, so it needs no sleep of its own; further retries only added
+        // latency to the critical path. Persistent drift still uses the real board (self-correcting).
         if (this.lastPredicted) {
           const predicted = this.lastPredicted;
           for (let retry = 0; !st.transition && !this.stop; retry++) {
             const actual = st.stackFilled.map(r => r.map(Boolean));
             if (matricesEqual(predicted.slice(4), actual.slice(4))) break;
-            if (retry === 2) { this.mispredicts++; break; }
+            if (retry === 1) { this.mispredicts++; break; }
             this.transientReads++;
-            await sleep(34);
             st = await this.readState(); mvReady = false;
           }
           this.lastPredicted = null;
         }
         const cur = st.current;
         const queueBefore = knownQueue(st.queue);
-        if (!cur || queueBefore.length < 2) { // wait for a trustworthy current/NEXT prefix
+        if (!cur || !queueBefore.length) { // wait for a trustworthy current/NEXT prefix
           idle++;
           if (!idleSince) idleSince = Date.now();
           // Independent liveness deadline: if we can't read a piece for this long straight, the
@@ -379,10 +385,15 @@ class ZenBot {
         }
         idle = 0;
         const holdBefore = st.hold;
+        // Tracking only needs queue[0] to name the next piece, so ONE known NEXT is enough to
+        // play. The exception is a hold move off an EMPTY hold: it consumes queue[0] as well, so
+        // the piece after it is queue[1]. Demanding two previews unconditionally threw away whole
+        // turns whenever one preview read badly, while the real piece kept falling.
+        const canHold = holdBefore ? true : queueBefore.length >= 2;
         if (!mvReady) {
           const sim = Board.fromMatrix(st.stackFilled);
           mv = pickMove({ board: sim, current: cur, queue: queueBefore, hold: holdBefore,
-                          canHold: true, keyPenalty: this.opts.keyPenalty || 0, beam: this.opts.aiBeam || 0 });
+                          canHold, keyPenalty: this.opts.keyPenalty || 0, beam: this.opts.aiBeam || 0 });
         }
         if (!mv) {
           if (!idleSince) idleSince = Date.now();
@@ -411,10 +422,12 @@ class ZenBot {
               const st2 = await this.readState();
               let mv2 = null, ready = false;
               try {
-                if (st2 && st2.current && knownQueue(st2.queue).length >= 2) {
+                const q2 = st2 ? knownQueue(st2.queue) : [];
+                if (st2 && st2.current && q2.length) {
                   mv2 = pickMove({ board: Board.fromMatrix(st2.stackFilled), current: st2.current,
-                                   queue: knownQueue(st2.queue), hold: st2.hold,
-                                   canHold: true, keyPenalty: this.opts.keyPenalty || 0, beam: this.opts.aiBeam || 0 });
+                                   queue: q2, hold: st2.hold,
+                                   canHold: st2.hold ? true : q2.length >= 2,
+                                   keyPenalty: this.opts.keyPenalty || 0, beam: this.opts.aiBeam || 0 });
                   ready = true; // mv2===null with ready=true means a real topout verdict
                 }
               } catch (e) {}

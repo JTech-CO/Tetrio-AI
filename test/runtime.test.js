@@ -58,12 +58,20 @@ test('mode switches preserve capture quality and explicit postdrop override but 
   assert.equal(bot.opts.postDropMs, 145);
   assert.equal(bot.opts.captureCell, 17);
 });
-test('ordinary play waits for missing NEXT instead of shifting later identities forward', async () => {
-  const bot = new ZenBot({ tap() { throw new Error('must not send input'); } });
-  const result = await bot.playOnce({ hasPiece: true, current: 'T', stackFilled: empty(),
-    queue: ['I', null, 'O', 'S'], hold: null });
-  assert.equal(result.skipped, true);
+test('play uses the known NEXT prefix only and never shifts later identities forward', async () => {
+  const bot = new ZenBot({ async tap() {} }, { postDropMs: 0 });
+  // queue[0] unreadable: tracking cannot name the next piece, so nothing may be played.
+  const blocked = await bot.playOnce({ hasPiece: true, current: 'T', stackFilled: empty(),
+    queue: [null, 'O', 'S'], hold: null });
+  assert.equal(blocked.skipped, true);
   assert.equal(bot.piecesPlaced, 0);
+  // One known NEXT is enough to play, but an EMPTY hold must not consume it: that would make
+  // the following piece queue[1], which is exactly the identity we cannot read.
+  const played = await bot.playOnce({ hasPiece: true, current: 'T', stackFilled: empty(),
+    queue: ['I', null, 'O'], hold: null });
+  assert.equal(played.skipped, undefined);
+  assert.equal(played.mv.useHold, false);
+  assert.equal(bot.current, 'I');
 });
 test('stage changes count once only after a stable new fingerprint; transient changes reset', async () => {
   const bot = new ZenBot({});
@@ -88,6 +96,17 @@ test('level-complete text invalidates legacy tracking before board parsing or in
   assert.equal(state.current, null);
   assert.equal(bot.current, null);
   assert.equal(bot.lastPredicted, null);
+});
+test('the clipped spawn strip bootstraps a missing piece but never overrides tracking', async () => {
+  const vision = { readBoard: () => ({ filled: empty(), grid: empty() }),
+    readQueue: () => ['I', 'O'], readHold: () => null, readSpawnPiece: () => 'I' };
+  const tracked = new ZenBot({});
+  tracked.vision = vision; tracked.current = 'T';
+  assert.equal((await tracked.readState({})).current, 'T');
+  assert.equal(tracked.resyncs, 0);
+  const bootstrapping = new ZenBot({});
+  bootstrapping.vision = vision;
+  assert.equal((await bootstrapping.readState({})).current, 'I');
 });
 test('CLI rejects invalid, missing and unknown arguments before connecting to the app', () => {
   for (const args of [['--mode', 'typo'], ['--pieces', '-1'], ['--pieces', '1.5'],
@@ -136,5 +155,18 @@ test('ordinary loop discards transient board reads before selecting the next pla
   assert.equal(reads, 2);
   assert.equal(inputs, 1);
   assert.equal(bot.mispredicts, 0);
+  assert.equal(bot.transientReads, 1);
+});
+
+test('a persistent mismatch costs one re-read, not a retry chain on the critical path', async () => {
+  const bot = new ZenBot({}, { postDropMs: 0 });
+  bot.lastPredicted = empty();
+  let reads = 0;
+  bot.readState = async () => { reads++; return { current: 'T', queue: ['I', 'O'], hold: null,
+    stackFilled: Array.from({ length: 20 }, () => Array(10).fill('I')) }; };
+  bot.runKeys = async () => true;
+  await bot.run({ maxPieces: 1, maxMs: 1000 });
+  assert.equal(reads, 2);
+  assert.equal(bot.mispredicts, 1);
   assert.equal(bot.transientReads, 1);
 });
