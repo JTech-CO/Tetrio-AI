@@ -22,6 +22,7 @@ const { Vision } = require('./vision/vision.js');
 const { ZenBot } = require('./bot.js');
 const { MODES, resolveMode } = require('./modes.js');
 const { enterZen } = require('./runtime/navigate.js');
+const { acquireTurboEnvironment } = require('./runtime/turbo-environment.js');
 
 function parseArgs(argv) {
   // Proactive "pit-stop": over very long sessions the app's renderer degrades (content
@@ -151,6 +152,22 @@ async function main() {
     console.log(`⇒ 모드 전환: ${MODES[name].label}`);
   };
 
+  // The game's bounce/shake/action-text effects rescale and shake the field on every hard
+  // drop and line clear — the window visibly pulses at play speed, and the field moves
+  // between calibration and the reads that depend on it. They are pinned for EVERY mode and
+  // the user's own settings are handed back on the way out.
+  const restoreVisuals = async (b) => {
+    for (const env of [b && b.turboVisual, b && b.visualEnv]) {
+      if (!env) continue;
+      try { await env.restore(); }
+      catch (e) {
+        console.warn(`  ⚠ 화면 설정 복원 실패 (${e.message}) — TETR.IO 설정에서 `
+          + 'bounciness / shakiness / action text 를 직접 되돌려 주세요.');
+      }
+    }
+    if (b) { b.turboVisual = null; b.visualEnv = null; }
+  };
+
   // Clean shutdown: ALWAYS close the CDP connection before exiting. Force-killing the app
   // (or the bot dying) while a CDP socket is still open can leave a stuck "zombie" process
   // that holds the single-instance lock and blocks the app from reopening. Closing the
@@ -164,9 +181,7 @@ async function main() {
         currentBot.inputExecutor.cancel();
         try { await currentBot.inputExecutor.releaseAll(); } catch (e) { console.error(e.message); }
       }
-      if (currentBot.turboVisual) {
-        try { await currentBot.turboVisual.restore(); } catch (e) { console.error(e.message); }
-      }
+      await restoreVisuals(currentBot);
     }
     try { rl.close(); } catch {}
     try { const tt = (currentBot && currentBot.t) || activeT; if (tt) await tt.close(); } catch {}
@@ -279,6 +294,10 @@ async function main() {
       }
       const bot = new ZenBot(t, botOpts);
       currentBot = bot;
+      // Pin the visual effects BEFORE calibrating, so the field is measured where it will
+      // actually be drawn. Non-fatal: a game that won't apply them still plays fine.
+      try { bot.visualEnv = await acquireTurboEnvironment(t); await sleep(50); }
+      catch (e) { console.warn('  ⚠ 화면 효과 고정 실패 — 그대로 진행합니다:', e.message); }
       await bot.calibrate();
       console.log('  ✓ 필드 보정 완료:', JSON.stringify(bot.absCal));
 
@@ -313,6 +332,7 @@ async function main() {
       // otherwise this was a pit-stop cap -> restart to refresh the renderer, then continue.
       totalPieces += bot.piecesPlaced; totalLines += bot.linesEstimate;
       totalStageUps += bot.stageUps; totalResyncs += bot.resyncs; totalMispredicts += bot.mispredicts;
+      await restoreVisuals(bot);
       currentBot = null;
       try { await t.close(); } catch {}
       activeT = null;
@@ -320,6 +340,7 @@ async function main() {
       pitStopDue = true;
       console.log(`  ♻ 정기 재시작(pit-stop): 렌더러 열화 예방 — 지금까지 ${totalPieces} 피스`);
     } catch (e) {
+      await restoreVisuals(currentBot);
       if (currentBot) {
         totalPieces += currentBot.piecesPlaced; totalLines += currentBot.linesEstimate;
         totalStageUps += currentBot.stageUps; totalResyncs += currentBot.resyncs;

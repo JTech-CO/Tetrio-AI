@@ -135,7 +135,10 @@ async function runTurbo(bot, { maxPieces = Infinity, maxMs = Infinity, onTurn = 
   try {
     c = validateCalibration(bot.opts.calibration || loadCalibration(bot.opts.calibrationPath));
     if (!viewportMatches(await bot.t.viewport())) throw new Error('TURBO viewport changed; recalibrate inputs');
-    if (c.environment.visualProfile) {
+    // When the session already pinned the profile for every mode, reuse it: acquiring again
+    // would capture the ALREADY-PINNED values as the user's originals and lose them, and
+    // restoring at the end of this segment would un-pin a session that is still playing.
+    if (c.environment.visualProfile && !bot.visualEnv) {
       visual = await require('./runtime/turbo-environment').acquireTurboEnvironment(bot.t);
       bot.turboVisual = visual;
       await sleep(50);

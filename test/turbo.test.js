@@ -171,6 +171,21 @@ function fakeBot({ captureError = false, mismatch = false, transitionAt = null }
     readLevelTransition: matrix => !!matrix.transition };
   return { bot, held, captures };
 }
+test('TURBO reuses a session-owned visual profile instead of pinning it a second time', async () => {
+  const withProfile = { ...calibration, environment: { ...calibration.environment,
+    visualProfile: require('../src/runtime/turbo-environment').VIDEO_PROFILE } };
+  // The fake connection has no eval(), so acquiring here would throw: reaching the end of a
+  // run proves the session's lease was reused, not re-acquired on top of itself.
+  const owned = { restore: async () => assert.fail('the session owns the lease, not TURBO') };
+  const { bot } = fakeBot();
+  bot.opts.calibration = withProfile;
+  bot.visualEnv = owned;
+  await runTurbo(bot, { maxPieces: 3, maxMs: 5000 });
+  assert.equal(bot.turboStats.fallbackReason, null);
+  assert.equal(bot.piecesPlaced, 3);
+  assert.equal(bot.turboVisual, null);
+  assert.equal(bot.visualEnv, owned);
+});
 test('TURBO executes pixel-verified simulated input, refreshes NEXT, and verifies finite tail', async () => {
   const { bot, held, captures } = fakeBot();
   await runTurbo(bot, { maxPieces: 6, maxMs: 5000 });
