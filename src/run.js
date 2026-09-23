@@ -283,8 +283,10 @@ async function main() {
       console.log(`  ▶ 플레이 시작 — 모드: ${MODES[modeName].label}`);
 
       if (modeName === 'TURBO') {
-        try { require('./input/calibration').loadCalibration(args.calibrationPath); }
-        catch (e) { console.warn(e.message); modeName = 'RAPID'; }
+        // Check against the size the app ACTUALLY opened at: a fresh launch comes up maximized,
+        // a restart of a windowed app keeps its window, and each needs its own measured profile.
+        try { require('./input/calibration').loadCalibration(args.calibrationPath, await t.viewport()); }
+        catch (e) { console.warn('  ⚠ ' + e.message + ' — RAPID 로 진행합니다.'); modeName = 'RAPID'; }
       }
       const botOpts = { ...MODES[modeName].opts, mode: modeName, jpegQuality: args.quality,
         calibrationPath: args.calibrationPath };

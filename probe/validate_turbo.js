@@ -40,14 +40,14 @@ function acceptance(r, requestedPieces) {
 async function main() {
   const pieces = Number(process.argv[2] || 500);
   if (!Number.isInteger(pieces) || pieces < 500) throw new Error('Acceptance requires 500 or more pieces');
-  const c = loadCalibration();
-  let t, visual;
+  let t, visual, c;
   const lifecycle = require('./lifecycle').probeLifecycle();
-  const report = { measuredAt: new Date().toISOString(), jev: 'disabled', calibration: c,
+  const report = { measuredAt: new Date().toISOString(), jev: 'disabled', calibration: null,
     note: 'Sequential live segments; independent bags/boards, not identical-input A/B. Input counts are estimates; sparse mismatch windows count all affected pieces as suspect.', segments: [] };
   try {
     t = await Tetrio.connect({ port: Number(process.env.TETRIO_PORT || 9222) });
     await applyFocusSpoof(t);
+    c = report.calibration = loadCalibration(null, await t.viewport());
     if (c.environment.visualProfile) {
       visual = await require('../src/runtime/turbo-environment').acquireTurboEnvironment(t);
       report.visualProfile = visual.applied;

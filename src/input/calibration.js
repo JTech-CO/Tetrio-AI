@@ -1,7 +1,16 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
-const DEFAULT_PATH = path.resolve(__dirname, '../../probe/turbo-calibration.json');
+const DIR = path.resolve(__dirname, '../../probe');
+const FILE_RE = /^turbo-calibration-\d+x\d+@[\d.]+\.json$/;
+const viewportKey = vp => `${vp.w}x${vp.h}@${vp.dpr}`;
+
+// One profile per viewport. Timing measured at one window size is not evidence for another,
+// and a single shared file let every calibration overwrite — or, by invalidating it before
+// measuring, destroy on a failed run — the profile of the other size the app launches at.
+function calibrationPath(viewport, dir = DIR) {
+  return path.join(dir, `turbo-calibration-${viewportKey(viewport)}.json`);
+}
 
 function validateCalibration(c) {
   if (!c || c.version !== 1 || c.validated !== true || c.scope !== 'ZEN') {
@@ -35,9 +44,31 @@ function validateCalibration(c) {
   return c;
 }
 
-function loadCalibration(file = DEFAULT_PATH) {
-  try { return validateCalibration(JSON.parse(fs.readFileSync(file, 'utf8'))); }
-  catch (e) { throw new Error(`TURBO 보정값을 사용할 수 없습니다 (${file}): ${e.message}. node probe/turbo_calibrate.js 를 실행하세요.`); }
+// Every valid profile on disk. An in-progress or failed measurement is simply not listed.
+function listCalibrations(dir = DIR) {
+  let files;
+  try { files = fs.readdirSync(dir).filter(f => FILE_RE.test(f)); } catch (e) { return []; }
+  return files.flatMap(f => {
+    try { return [validateCalibration(JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')))]; }
+    catch (e) { return []; }
+  });
 }
 
-module.exports = { DEFAULT_PATH, validateCalibration, loadCalibration };
+// An explicit file is used as-is. Otherwise pick the profile measured at `viewport`; without a
+// viewport (a pre-flight "is TURBO available at all?" check) any valid profile will do.
+function loadCalibration(file = null, viewport = null, dir = DIR) {
+  if (file) {
+    try { return validateCalibration(JSON.parse(fs.readFileSync(file, 'utf8'))); }
+    catch (e) { throw new Error(`TURBO 보정값을 사용할 수 없습니다 (${file}): ${e.message}. node probe/turbo_calibrate.js 를 실행하세요.`); }
+  }
+  const all = listCalibrations(dir);
+  const hit = viewport ? all.find(c => viewportKey(c.environment.viewport) === viewportKey(viewport)) : all[0];
+  if (hit) return hit;
+  const have = all.map(c => viewportKey(c.environment.viewport)).join(', ') || '없음';
+  throw new Error(viewport
+    ? `이 창 크기(${viewportKey(viewport)})에서 측정한 TURBO 보정이 없습니다 (보정된 크기: ${have}). `
+      + '창 크기를 그대로 두고 node probe/turbo_calibrate.js 를 실행하세요.'
+    : 'TURBO 보정값이 없습니다. node probe/turbo_calibrate.js 를 실행하세요.');
+}
+
+module.exports = { calibrationPath, listCalibrations, validateCalibration, loadCalibration, viewportKey };

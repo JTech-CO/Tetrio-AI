@@ -11,7 +11,7 @@ const { pickMove } = require('../src/ai');
 const { applyMove } = require('../src/state');
 const { planInput } = require('../src/input/planner');
 const { InputExecutor } = require('../src/input/executor');
-const { DEFAULT_PATH, validateCalibration } = require('../src/input/calibration');
+const { calibrationPath, validateCalibration } = require('../src/input/calibration');
 const { bootstrap, observe, verifyObservation, matches } = require('../src/turbo');
 
 async function measure(bot, c, pieces) {
@@ -74,9 +74,7 @@ async function main() {
   const pieces = Number(process.argv[2] || 120);
   if (!Number.isInteger(pieces) || pieces < 100) throw new Error('Use at least 100 calibration pieces');
   const port = Number(process.env.TETRIO_PORT || 9222);
-  // Invalidate old evidence BEFORE attempting a new measurement.
-  fs.writeFileSync(DEFAULT_PATH, JSON.stringify({ version: 1, validated: false, reason: 'calibration in progress' }, null, 2));
-  let t, visual;
+  let t, visual, target;
   const lifecycle = require('./lifecycle').probeLifecycle();
   const attempts = [];
   try {
@@ -88,6 +86,10 @@ async function main() {
     await bot.calibrate();
     const environment = { viewport: await t.viewport(), measuredAt: new Date().toISOString(), port,
       visualProfile: visual.applied };
+    // Invalidate old evidence for THIS size before measuring it again; other sizes keep theirs.
+    target = calibrationPath(environment.viewport);
+    fs.writeFileSync(target, JSON.stringify({ version: 1, validated: false, reason: 'calibration in progress' }, null, 2));
+    console.log('Calibrating viewport', JSON.stringify(environment.viewport), '->', target);
     let best = null;
     for (const spawnMs of [120, 95, 80, 65]) {
       const c = { version: 1, scope: 'ZEN', validated: false, tapHoldMs: 17, tapGapMs: 5,
@@ -124,8 +126,8 @@ async function main() {
       attempts.push(wall);
       if (wall.validated) best = wall;
       validateCalibration(best);
-      fs.writeFileSync(DEFAULT_PATH, JSON.stringify(best, null, 2));
-      console.log('Saved measured profile:', DEFAULT_PATH);
+      fs.writeFileSync(target, JSON.stringify(best, null, 2));
+      console.log('Saved measured profile:', target);
     } else throw new Error('No input profile passed; TURBO remains disabled');
   } finally {
     fs.writeFileSync(require('node:path').join(__dirname, 'turbo-calibration-attempts.json'), JSON.stringify(attempts, null, 2));

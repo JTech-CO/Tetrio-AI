@@ -5,7 +5,7 @@ const { Tetrio } = require('../src/runtime/cdp');
 const { applyFocusSpoof } = require('../src/runtime/focus');
 const { ZenBot } = require('../src/bot');
 const { MODES } = require('../src/modes');
-const { loadCalibration, validateCalibration, DEFAULT_PATH } = require('../src/input/calibration');
+const { loadCalibration, validateCalibration, calibrationPath } = require('../src/input/calibration');
 const { measure } = require('./turbo_calibrate');
 
 async function main() {
@@ -40,7 +40,7 @@ async function main() {
       { sequence: c.evidence.lastMismatch.sequence, clear: c.evidence.lastMismatch.clear,
         matchesAfter250Ms: c.evidence.lastMismatch.matchesAfter250Ms } : undefined } }, null, 2));
     if (c.validated && process.argv.includes('--save')) {
-      validateCalibration(c); fs.writeFileSync(DEFAULT_PATH, JSON.stringify(c, null, 2));
+      validateCalibration(c); fs.writeFileSync(calibrationPath(c.environment.viewport), JSON.stringify(c, null, 2));
     }
     if (!c.validated) process.exitCode = 1;
   } finally {

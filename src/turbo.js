@@ -133,8 +133,9 @@ async function runTurbo(bot, { maxPieces = Infinity, maxMs = Infinity, onTurn = 
     sinceVerify = 0; sinceFull = 0; mismatchStreak = 0;
   };
   try {
-    c = validateCalibration(bot.opts.calibration || loadCalibration(bot.opts.calibrationPath));
-    if (!viewportMatches(await bot.t.viewport())) throw new Error('TURBO viewport changed; recalibrate inputs');
+    const vp = await bot.t.viewport();
+    c = validateCalibration(bot.opts.calibration || loadCalibration(bot.opts.calibrationPath, vp));
+    if (!viewportMatches(vp)) throw new Error('TURBO viewport changed; recalibrate inputs');
     // When the session already pinned the profile for every mode, reuse it: acquiring again
     // would capture the ALREADY-PINNED values as the user's originals and lose them, and
     // restoring at the end of this segment would un-pin a session that is still playing.
