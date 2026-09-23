@@ -71,4 +71,15 @@ function loadCalibration(file = null, viewport = null, dir = DIR) {
     : 'TURBO 보정값이 없습니다. node probe/turbo_calibrate.js 를 실행하세요.');
 }
 
-module.exports = { calibrationPath, listCalibrations, validateCalibration, loadCalibration, viewportKey };
+// What is on disk for one size: a usable profile; a measured verdict that TURBO timing does
+// not hold there; or nothing conclusive (no file, an interrupted run, an inconclusive one).
+function calibrationStatus(viewport, dir = DIR) {
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(calibrationPath(viewport, dir), 'utf8')); }
+  catch (e) { return { state: 'missing' }; }
+  try { return { state: 'valid', calibration: validateCalibration(raw) }; }
+  catch (e) { return raw && raw.reason === 'calibration failed' ? { state: 'failed', record: raw } : { state: 'missing' }; }
+}
+
+module.exports = { DIR, calibrationPath, calibrationStatus, listCalibrations, validateCalibration,
+  loadCalibration, viewportKey };

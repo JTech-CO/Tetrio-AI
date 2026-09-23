@@ -6,7 +6,7 @@ const { fromObservation, applyMove, knownQueue } = require('./state');
 const { pickMove } = require('./ai');
 const { planInput } = require('./input/planner');
 const { InputExecutor } = require('./input/executor');
-const { loadCalibration, validateCalibration } = require('./input/calibration');
+const { loadCalibration, validateCalibration, calibrationStatus, viewportKey } = require('./input/calibration');
 const { preciseSleep, sleep } = require('./runtime/cdp');
 const { HIDDEN, HEIGHT, WIDTH } = require('./board');
 
@@ -76,6 +76,29 @@ async function verifyObservation(bot, capture, state, full) {
   return { ...observation, latencyMs: performance.now() - start, transientFrames };
 }
 
+// The app opens at different window sizes (fresh launch, restored window, bot restart), and
+// each needs its own measured profile. A size with none is measured here, once, instead of
+// silently falling back. A size whose most conservative rung already mispredicted is NOT
+// retried automatically — a lucky later pass would save a marginal profile — but the probe
+// can still re-measure it on purpose. Returns true when it calibrated.
+async function ensureCalibration(bot) {
+  if (bot.opts.calibration || bot.opts.calibrationPath) return false;
+  const vp = await bot.t.viewport();
+  const status = calibrationStatus(vp);
+  if (status.state === 'valid') return false;
+  if (status.state === 'failed') {
+    throw new Error(`이 창 크기(${viewportKey(vp)})는 자동 보정에서 TURBO 타이밍이 맞지 않았습니다 `
+      + `(${status.record.lastError}). 창 크기를 바꾸거나, 이 크기로 다시 재려면 npm run turbo:calibrate`);
+  }
+  console.log(`  ⚙ 이 창 크기(${viewportKey(vp)})의 TURBO 보정이 없어 자동 보정합니다 — 2~4분, 창을 가리지 마세요.`);
+  const { best, attempts } = await require('./input/autocalibrate').calibrateInputs(bot, {
+    visualProfile: bot.visualEnv?.applied, log: line => console.log('    ' + line) });
+  const placed = attempts.reduce((n, a) => n + (a.evidence?.pieces || 0), 0);
+  console.log(`  ✓ 자동 보정 완료: spawn ${best.spawnMs}ms${best.overlap ? ' + 회전·이동 동시 입력' : ''}`
+    + ` (보정 중 놓은 ${placed}피스는 통계에 넣지 않음)`);
+  return true;
+}
+
 async function bootstrap(bot, sequence) {
   bot.current = null;
   const deadline = performance.now() + 15000;
@@ -114,7 +137,8 @@ async function runTurbo(bot, { maxPieces = Infinity, maxMs = Infinity, onTurn = 
   const viewportMatches = vp => ['w', 'h', 'dpr'].every(k => vp[k] === c.environment.viewport[k]);
   const executor = new InputExecutor(bot.t);
   bot.inputExecutor = executor;
-  const start = performance.now(), initialPieces = bot.piecesPlaced;
+  let start = performance.now();
+  const initialPieces = bot.piecesPlaced;
   const metrics = bot.turboStats = { verified: 0, fullReads: 0, boardReads: 0, mismatchWindows: 0,
     suspectPieces: 0, forcedResyncs: 0, inputErrors: 0, verificationLatencyMs: 0,
     effectivePps: 0, transientFrames: 0, stageTransitions: 0, fallbackReason: null, sequence: bot.piecesPlaced };
@@ -133,6 +157,8 @@ async function runTurbo(bot, { maxPieces = Infinity, maxMs = Infinity, onTurn = 
     sinceVerify = 0; sinceFull = 0; mismatchStreak = 0;
   };
   try {
+    // Measuring a new window size takes minutes; that is not TURBO play time.
+    if (await ensureCalibration(bot)) start = readyAt = performance.now();
     const vp = await bot.t.viewport();
     c = validateCalibration(bot.opts.calibration || loadCalibration(bot.opts.calibrationPath, vp));
     if (!viewportMatches(vp)) throw new Error('TURBO viewport changed; recalibrate inputs');

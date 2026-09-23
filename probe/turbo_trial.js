@@ -6,7 +6,7 @@ const { applyFocusSpoof } = require('../src/runtime/focus');
 const { ZenBot } = require('../src/bot');
 const { MODES } = require('../src/modes');
 const { loadCalibration, validateCalibration, calibrationPath } = require('../src/input/calibration');
-const { measure } = require('./turbo_calibrate');
+const { measure } = require('../src/input/autocalibrate');
 
 async function main() {
   const spawnMs = Number(process.argv[2] || 95);

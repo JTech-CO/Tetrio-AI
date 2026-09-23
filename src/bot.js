@@ -60,7 +60,9 @@ class ZenBot {
     const { MODES } = require('./modes.js');
     const m = MODES[name && String(name).toUpperCase()];
     if (!m) return null;
-    if (m.key === 'TURBO') {
+    // Only an explicit profile file can be checked up front; without one TURBO measures the
+    // window size it finds itself at (turbo.js ensureCalibration).
+    if (m.key === 'TURBO' && this.opts.calibrationPath) {
       require('./input/calibration').loadCalibration(this.opts.calibrationPath);
     }
     if (this.running) { this.pendingMode = m.key; return m; }

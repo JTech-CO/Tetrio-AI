@@ -109,7 +109,7 @@ function printModeMenu(current) {
 
 async function main() {
   const args = parseArgs(process.argv);
-  if (args.mode === 'TURBO') require('./input/calibration').loadCalibration(args.calibrationPath);
+  if (args.mode === 'TURBO' && args.calibrationPath) require('./input/calibration').loadCalibration(args.calibrationPath);
   console.log(`▶ TETR.IO ZEN 봇 시작 (port=${args.port}, pieces=${args.pieces === Infinity ? '∞' : args.pieces})`);
 
   const t0 = Date.now();
@@ -140,7 +140,7 @@ async function main() {
 
   // Apply a mode to the running bot (re-applies an explicit --postdrop override on top).
   const applyMode = (name) => {
-    if (name === 'TURBO') {
+    if (name === 'TURBO' && args.calibrationPath) {
       try { require('./input/calibration').loadCalibration(args.calibrationPath); }
       catch (e) { console.warn(e.message); return; }
     }
@@ -282,10 +282,10 @@ async function main() {
       }
       console.log(`  ▶ 플레이 시작 — 모드: ${MODES[modeName].label}`);
 
-      if (modeName === 'TURBO') {
-        // Check against the size the app ACTUALLY opened at: a fresh launch comes up maximized,
-        // a restart of a windowed app keeps its window, and each needs its own measured profile.
-        try { require('./input/calibration').loadCalibration(args.calibrationPath, await t.viewport()); }
+      // The per-window-size profile (and measuring a size that has none) is TURBO's own job at
+      // its start, so a live switch to TURBO gets it too. Only an explicit file is checked here.
+      if (modeName === 'TURBO' && args.calibrationPath) {
+        try { require('./input/calibration').loadCalibration(args.calibrationPath); }
         catch (e) { console.warn('  ⚠ ' + e.message + ' — RAPID 로 진행합니다.'); modeName = 'RAPID'; }
       }
       const botOpts = { ...MODES[modeName].opts, mode: modeName, jpegQuality: args.quality,
