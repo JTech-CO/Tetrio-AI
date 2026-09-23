@@ -1,0 +1,57 @@
+TURBO 자동 보정 실측 로그 — 2026-09-24
+측정: node src/run.js --mode turbo --pieces 200 (창 1295×997 DPR 2, 이 크기의 보정 프로필이 없는 상태)
+환경: TETR.IO Desktop 10.0.0 / Chrome 138.0.7204.235
+
+TURBO 가 시작하면서 현재 창 크기의 프로필이 없음을 확인하고, 그 자리에서 입력 보정을 한 뒤
+저장된 프로필로 곧바로 TURBO 플레이를 이어간 기록이다. 모드 선택 메뉴 줄만 걸러냈고
+로컬 절대 경로는 상대 경로로 바꿨다. 그 외 출력과 수치는 그대로다.
+"실효 PPS"는 turboStats.effectivePps 이며 보정 시간은 포함하지 않는다. 종료 줄의
+"평균 피스/초"는 run.js 가 세션 시작부터 잰 벽시계 평균이라 보정 시간이 포함돼 있다.
+
+▶ TETR.IO ZEN 봇 시작 (port=9222, pieces=200)
+  앱: 기존 인스턴스 재사용 — Chrome/138.0.7204.235
+  광고 차단: 적용됨 (네트워크 + DOM 제거)
+  ✓ ZEN 화면 감지됨.
+
+  (입력 없음 — TURBO 모드로 시작합니다)
+  ▶ 플레이 시작 — 모드: TURBO — 실험용 예측 실행 (입력 보정 필수, 목표 5.0+ PPS)
+  ✓ 필드 보정 완료: {"screenshotW":2590,"screenshotH":1994,"fieldLeft":1063,"fieldRight":1526,"fieldBottom":1462,"cols":10,"rows":20}
+  ⚙ 이 창 크기(1295x997@2)의 TURBO 보정이 없어 자동 보정합니다 — 2~4분, 창을 가리지 마세요.
+    Calibrating viewport {"w":1295,"h":997,"dpr":2} -> probe/turbo-calibration-1295x997@2.json
+    Measuring 120 pieces: spawn=120ms, taps=17/5ms
+    {"pieces":120,"mismatches":0,"wallLeft":0,"wallRight":0,"keys":{"180":16,"left":131,"hard":120,"hold":32,"cw":26,"right":173,"ccw":9},"bursts":73,"transientFrames":0,"maxVerificationMs":193.48199999999997,"overlapped":0,"seconds":31.904184800000003}
+    Measuring 120 pieces: spawn=95ms, taps=17/5ms
+    {"pieces":120,"mismatches":0,"wallLeft":0,"wallRight":0,"keys":{"180":9,"left":136,"hard":120,"hold":41,"cw":32,"right":156,"ccw":6},"bursts":73,"transientFrames":0,"maxVerificationMs":107.29589999999735,"overlapped":0,"seconds":28.8847549}
+    Measuring 120 pieces: spawn=80ms, taps=17/5ms
+    {"pieces":120,"mismatches":0,"wallLeft":0,"wallRight":0,"keys":{"180":14,"ccw":10,"right":167,"hard":120,"cw":29,"left":127,"hold":38},"bursts":71,"transientFrames":0,"maxVerificationMs":111.19839999999385,"overlapped":0,"seconds":24.780216400000004}
+    Measuring 120 pieces: spawn=65ms, taps=17/5ms
+    {"pieces":120,"mismatches":0,"wallLeft":0,"wallRight":0,"keys":{"180":8,"left":135,"hard":120,"cw":28,"right":164,"ccw":7,"hold":34},"bursts":70,"transientFrames":0,"maxVerificationMs":97.20650000000023,"overlapped":0,"seconds":24.715594299999996}
+    Measuring rotation + first movement overlap
+    {"pieces":120,"mismatches":0,"wallLeft":0,"wallRight":0,"keys":{"180":8,"right":169,"hard":120,"left":128,"hold":24,"cw":21,"ccw":4},"bursts":75,"transientFrames":0,"maxVerificationMs":89.98219999999856,"overlapped":32,"seconds":21.944811}
+    Measuring wall hold candidate: 70ms
+      mismatch {"sequence":4,"expectedCurrent":"Z","actualCurrent":null,"expectedHold":"T","actualHold":"T","expectedQueue":["I","S","L"],"actualQueue":["I","S","L","T","O"]}
+    {"pieces":4,"mismatches":1,"wallLeft":1,"wallRight":0,"keys":{"ccw":1,"left":5,"hard":4,"cw":1,"right":2},"bursts":2,"transientFrames":3,"maxVerificationMs":303.78250000000116,"overlapped":2,"lastMismatch":{"sequence":4,"clear":true,"matchesAfter250Ms":false},"seconds":1.574689400000003}
+    Saved measured profile: probe/turbo-calibration-1295x997@2.json
+  ✓ 자동 보정 완료: spawn 65ms + 회전·이동 동시 입력 (보정 중 놓은 604피스는 통계에 넣지 않음)
+  TURBO 실효 4.83 PPS | 검증 65ms | 의심 피스 상한 0
+  [TURBO] 피스 20 | 라인(추정) 10 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 0.13/초 | 최근 5.48/초
+  TURBO 실효 5.19 PPS | 검증 60ms | 의심 피스 상한 0
+  [TURBO] 피스 40 | 라인(추정) 18 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 0.26/초 | 최근 5.67/초
+  TURBO 실효 5.43 PPS | 검증 54ms | 의심 피스 상한 0
+  [TURBO] 피스 60 | 라인(추정) 26 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 0.39/초 | 최근 5.87/초
+  TURBO 실효 5.52 PPS | 검증 73ms | 의심 피스 상한 0
+  [TURBO] 피스 80 | 라인(추정) 33 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 0.50/초 | 최근 5.82/초
+  TURBO 실효 5.43 PPS | 검증 74ms | 의심 피스 상한 0
+  [TURBO] 피스 100 | 라인(추정) 40 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 0.61/초 | 최근 5.31/초
+  TURBO 실효 5.47 PPS | 검증 84ms | 의심 피스 상한 0
+  [TURBO] 피스 120 | 라인(추정) 51 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 0.72/초 | 최근 5.70/초
+  TURBO 실효 5.46 PPS | 검증 74ms | 의심 피스 상한 0
+  [TURBO] 피스 140 | 라인(추정) 58 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 0.82/초 | 최근 5.51/초
+  TURBO 실효 5.48 PPS | 검증 58ms | 의심 피스 상한 0
+  [TURBO] 피스 160 | 라인(추정) 66 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 0.92/초 | 최근 5.55/초
+  TURBO 실효 5.49 PPS | 검증 67ms | 의심 피스 상한 0
+  [TURBO] 피스 180 | 라인(추정) 73 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 1.01/초 | 최근 5.68/초
+  TURBO 실효 5.51 PPS | 검증 65ms | 의심 피스 상한 0
+  [TURBO] 피스 200 | 라인(추정) 82 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 1.11/초 | 최근 5.74/초
+
+⏹ 종료: 200 피스, 라인(추정) 82, 스테이지업 0, 리싱크 0, 오배치(추정) 0, 181s, 1.10 피스/초

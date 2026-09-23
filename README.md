@@ -25,23 +25,22 @@ ZEN 자동 진입이 실패하면 앱에서 Solo → ZEN으로 들어가세요.
 | RAPID | 화면 읽기·다음 수 계산을 스폰 대기와 병렬 수행 |
 | TURBO | 보정된 입력과 최대 2피스 예측 실행, 비동기 화면 검증 |
 
-**최종 TURBO 실측: 500피스 / 93.940초 = 5.323 PPS.** 의심 피스·재동기화·입력 오류·폴백 모두 0회였습니다.
-최종 코드의 1,000피스 완주는 미검증이며, 장기 실행에서 간헐적 캡처 지연 폴백이 관측됐습니다.
+**최종 TURBO 실측: 500피스 / 93.940초 = 5.323 PPS**(합격 판정 스크립트 기준). 의심 피스·재동기화·입력 오류·폴백 모두 0회였습니다.
+이후 1,000피스도 폴백·오배치 없이 완주했습니다(최고 실효 5.71 PPS, `run.js` 측정). 레벨 전환이 포함된 장기 실행은 아직 검증되지 않았습니다.
 
 ## TURBO 실행·검증
 
-먼저 `npm start`로 디버그 포트를 열고 ZEN에 진입한 뒤 봇을 종료합니다. 앱은 열어 둔 채 다음을 실행하세요.
-
 ```bash
-npm run turbo:calibrate -- 120
 node src/run.js --mode turbo --pieces 500
-node probe/validate_turbo.js 500 --turbo-only --warmup
 ```
 
-- 키 설정·DAS/ARR·게임 버전·창 크기가 바뀌면 다시 보정하세요. 보정 파일은 머신별로 생성하며 Git에 포함하지 않습니다.
-- TURBO는 화면 흔들림·바운스·액션 텍스트를 잠시 끄고 종료·오류·모드 전환 시 복원합니다.
+- 입력 보정은 창 크기마다 따로 저장되며(`probe/turbo-calibration-<w>x<h>@<dpr>.json`), 처음 보는 크기에서는 TURBO가 시작할 때 자동으로 보정합니다(2~4분). 보정 중에는 TETR.IO 창을 가리지 마세요 — 창이 가려지면 게임이 멈춰 보정할 수 없습니다.
+- 최대화 창은 화면 갱신이 느려 보정에 실패할 수 있습니다. 실패한 크기는 기록되어 이후 바로 RAPID로 진행하므로, TURBO는 창 모드로 실행하세요.
+- 키 설정·DAS/ARR·게임 버전이 바뀌면 `npm run turbo:calibrate`로 다시 재거나 보정 파일을 지워 자동 보정이 다시 돌게 하세요. 보정 파일은 머신별이며 Git에 포함하지 않습니다.
+- 공식 합격 판정은 `node probe/validate_turbo.js 500 --turbo-only --warmup`이며, 현재 창 크기로 보정된 상태여야 합니다(결과: `probe/turbo-validation-500.json`). 수동 보정과 합격 판정 스크립트는 메뉴를 조작하지 않으므로 앱이 ZEN 화면에 있을 때 실행합니다.
+- 모든 모드에서 화면 흔들림·바운스·액션 텍스트를 잠시 끄고, 종료·오류 시 원래 설정으로 복원합니다.
 - 지속 불일치나 지연은 재동기화 또는 RAPID 폴백으로 처리합니다. Jev는 사용하지 않습니다.
-- 프로브 포트는 `TETRIO_PORT`로 지정합니다(기본 9222). 결과는 `probe/turbo-validation-500.json` 등에 저장됩니다.
+- 프로브 포트는 `TETRIO_PORT`로 지정합니다(기본 9222).
 
 ## 실행 옵션
 
@@ -50,7 +49,7 @@ node probe/validate_turbo.js 500 --turbo-only --warmup
 | `--mode basic/rapid/turbo` | basic | 시작 모드 |
 | `--pieces N` | 무제한 | 배치 수 제한 |
 | `--port P` | 9222 | CDP 포트 |
-| `--calibration FILE` | probe/turbo-calibration.json | TURBO 보정 파일 |
+| `--calibration FILE` | 창 크기별 자동 선택 | 지정한 TURBO 보정 파일만 사용(자동 보정 안 함) |
 | `--restart` | 꺼짐 | 앱 재시작 |
 | `--restart-every N` / `--restart-mins M` | 2500 / 20 | 먼저 도달한 조건에서 재시작, 0은 해당 조건 해제 |
 | `--quality Q` | 85 | JPEG 품질(1–100) |
