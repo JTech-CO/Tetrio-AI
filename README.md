@@ -63,4 +63,3 @@ node probe/validate_turbo.js 500 --turbo-only --warmup
 
 - [TURBO 구현·검증 요약](docs/TURBO-RESULTS-KR.md)
 - [일반 모드·공통 런타임 수정](docs/LEGACY-DEBUG-KR.md)
-- [TURBO 설계 백서](Tetrio-AI-TURBO-Design-KR-v0.1.0.md)
