@@ -1,0 +1,56 @@
+TURBO 1,000피스 재검증 실측 로그 — 2026-09-23
+측정: node src/run.js --mode turbo --pieces 1000
+환경: 뷰포트 1295×999 DPR 2 / TETR.IO Desktop 10.0.0 / Chrome 138.0.7204.235
+
+주의: 이 파일은 probe/validate_turbo.js 의 합격 판정 출력이 아니라 run.js 의 콘솔 로그다.
+"실효 PPS"는 TURBO 가 스스로 보고하는 turboStats.effectivePps 값이다.
+런 로그는 tail -60 으로 잘려 440피스 지점부터 남았다.
+
+=== 입력 보정 (node probe/turbo_calibrate.js) ===
+Measuring 120 pieces: spawn=120ms, taps=17/5ms
+{"pieces":120,"mismatches":0,"wallLeft":0,"wallRight":0,"keys":{"180":16,"right":165,"hard":120,"cw":26,"left":133,"hold":35,"ccw":4},"bursts":74,"transientFrames":0,"maxVerificationMs":64.34490000000005,"overlapped":0,"seconds":29.8264034}
+Measuring 120 pieces: spawn=95ms, taps=17/5ms
+  mismatch {"sequence":42,"expectedCurrent":"Z","actualCurrent":null,"expectedHold":"O","actualHold":"O","expectedQueue":["J","O","S"],"actualQueue":["I","Z","J","O","S"]}
+{"pieces":42,"mismatches":1,"wallLeft":0,"wallRight":0,"keys":{"180":5,"cw":12,"left":46,"hard":42,"hold":10,"right":58,"ccw":5},"bursts":25,"transientFrames":2,"maxVerificationMs":176.5734999999986,"overlapped":0,"lastMismatch":{"sequence":42,"clear":true,"matchesAfter250Ms":false},"seconds":9.392911}
+Measuring rotation + first movement overlap
+{"pieces":120,"mismatches":0,"wallLeft":0,"wallRight":0,"keys":{"180":16,"hard":120,"left":125,"hold":33,"right":157,"cw":21,"ccw":5},"bursts":74,"transientFrames":0,"maxVerificationMs":58.442699999999604,"overlapped":39,"seconds":36.3057825}
+Measuring wall hold candidate: 70ms
+  mismatch {"sequence":4,"expectedCurrent":"L","actualCurrent":null,"expectedHold":"S","actualHold":"S","expectedQueue":["T","L","O"],"actualQueue":["T","L","O","S","J"]}
+Saved measured profile: probe/turbo-calibration.json
+
+저장된 프로필: spawnMs 120 · overlap true · wallHoldMs null · taps 17/5 · afterRotate 10
+              settle 15/100 · viewport {w:1295,h:999,dpr:2}
+              evidence: 120피스 / 불일치 0 / 동시입력 39
+
+=== 1,000피스 TURBO 런 (440피스 지점부터) ===
+  TURBO 실효 4.93 PPS | 검증 45ms | 의심 피스 상한 0
+  [TURBO] 피스 440 | 라인(추정) 177 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 4.46/초 | 최근 5.01/초
+  TURBO 실효 4.94 PPS | 검증 49ms | 의심 피스 상한 0
+  [TURBO] 피스 480 | 라인(추정) 194 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 4.51/초 | 최근 5.14/초
+  TURBO 실효 4.95 PPS | 검증 33ms | 의심 피스 상한 0
+  [TURBO] 피스 520 | 라인(추정) 210 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 4.55/초 | 최근 5.11/초
+  TURBO 실효 4.96 PPS | 검증 38ms | 의심 피스 상한 0
+  [TURBO] 피스 580 | 라인(추정) 234 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 4.60/초 | 최근 5.08/초
+  TURBO 실효 4.97 PPS | 검증 46ms | 의심 피스 상한 0
+  [TURBO] 피스 620 | 라인(추정) 249 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 4.63/초 | 최근 5.12/초
+  TURBO 실효 4.99 PPS | 검증 44ms | 의심 피스 상한 0
+  [TURBO] 피스 680 | 라인(추정) 274 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 4.67/초 | 최근 5.24/초
+  TURBO 실효 5.00 PPS | 검증 41ms | 의심 피스 상한 0
+  [TURBO] 피스 740 | 라인(추정) 298 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 4.70/초 | 최근 5.12/초
+  TURBO 실효 5.01 PPS | 검증 38ms | 의심 피스 상한 0
+  [TURBO] 피스 800 | 라인(추정) 321 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 4.73/초 | 최근 5.22/초
+  TURBO 실효 5.02 PPS | 검증 38ms | 의심 피스 상한 0
+  [TURBO] 피스 880 | 라인(추정) 353 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 4.76/초 | 최근 5.13/초
+  TURBO 실효 5.03 PPS | 검증 43ms | 의심 피스 상한 0
+  [TURBO] 피스 940 | 라인(추정) 377 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 4.79/초 | 최근 5.21/초
+  TURBO 실효 5.03 PPS | 검증 40ms | 의심 피스 상한 0
+  [TURBO] 피스 1000 | 라인(추정) 401 | 스테이지업 0 | 리싱크 0 | 오배치(추정) 0 | 평균 4.80/초 | 최근 4.89/초
+
+⏹ 종료: 1000 피스, 라인(추정) 401, 스테이지업 0, 리싱크 0, 오배치(추정) 0, 208s, 4.80 피스/초
+
+=== 같은 날 RAPID 1,000피스 (비교) ===
+node src/run.js --mode turbo --pieces 1000 로 시작했으나 앱 재시작으로 창이 1278×1002 → 1295×999 로
+바뀌어 보정이 무효화되어 RAPID 로 폴백한 런이다. 회귀 수정의 장기 확인 자료로만 쓴다.
+
+[TURBO → RAPID] TURBO viewport changed; recalibrate inputs
+⏹ 종료: 1000 피스, 라인(추정) 400, 스테이지업 0, 리싱크 0, 오배치(추정) 0, 250s, 4.00 피스/초
