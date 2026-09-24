@@ -50,6 +50,16 @@ const preciseSleep = (ms) => new Promise((res) => {
 // waiting until Chromium has ANSWERED the previous one, not merely until it timed out on our side.
 let captureChain = Promise.resolve();
 
+// Say why a connection dropped. chrome-remote-interface only emits a bare 'disconnect'; the
+// close code tells a server-side close (1000/1001) from a socket that just died (1006). Its
+// own close() removes these listeners first, so only unexpected drops are reported.
+function reportDrops(client, label) {
+  try {
+    client._ws.on('close', (code, reason) => console.warn(`[CDP] ${label} 연결 끊김 code=${code}`
+      + (reason && reason.length ? ` reason=${reason}` : '') + ` @ ${new Date().toISOString()}`));
+  } catch (e) {}
+}
+
 class Tetrio {
   constructor(client) {
     this.client = client;
@@ -86,6 +96,7 @@ class Tetrio {
     const t = new Tetrio(client);
     t.targetId = page.id;
     t.port = port;
+    reportDrops(client, 'main');
     if (keepAwake) await t.keepCompositorAwake();
     return t;
   }
@@ -191,6 +202,7 @@ class Tetrio {
     const client = await withTimeout(CDP({ target: this.targetId, port: this.port }), 5000, 'capture attach');
     try { await withTimeout(client.Page.enable(), 3000, 'capture Page.enable'); }
     catch (e) { await client.close(); throw e; }
+    reportDrops(client, 'capture');
     return new Tetrio(client);
   }
 

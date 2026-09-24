@@ -224,3 +224,15 @@ test('a page view stuck at the capture size is reported as degradation for an im
   bot.t.viewport = async () => ({ w: 1295, h: 997, dpr: 2 });
   await bot.assertViewport();
 });
+
+test('mismatch diagnostics are written only when enabled, and capped', () => {
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'diag-'));
+  const st = { stackFilled: empty(), current: 'T', queue: ['I'], hold: null,
+    buf: { width: 2, height: 1, data: Buffer.alloc(8) } };
+  const bot = new ZenBot({}, { diagnosticsDir: dir });
+  for (let i = 0; i < 65; i++) { bot.piecesPlaced = i; bot.dumpMismatch(empty(), st); }
+  assert.equal(fs.readdirSync(dir).filter(f => f.endsWith('.json')).length, 60);
+  assert.equal(fs.readdirSync(dir).filter(f => f.endsWith('.jpg')).length, 60);
+  new ZenBot({}).dumpMismatch(empty(), st); // disabled: nothing to write, nothing thrown
+});

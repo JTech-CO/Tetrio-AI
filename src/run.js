@@ -298,7 +298,9 @@ async function main() {
         catch (e) { console.warn('  ⚠ ' + e.message + ' — RAPID 로 진행합니다.'); modeName = 'RAPID'; }
       }
       const botOpts = { ...MODES[modeName].opts, mode: modeName, jpegQuality: args.quality,
-        calibrationPath: args.calibrationPath };
+        calibrationPath: args.calibrationPath,
+        // Mismatch frames for diagnosis (RAPID and TURBO); off unless the variable is set.
+        diagnosticsDir: process.env.TETRIO_DIAG_DIR || undefined };
       if (args.postdrop !== null) {
         botOpts.postDropMs = Math.max(90, args.postdrop);
         botOpts.modeOverrides = { postDropMs: botOpts.postDropMs };

@@ -184,6 +184,24 @@ class ZenBot {
     }
   }
 
+  // The frame a counted misprediction was decided on, next to the prediction. Off unless
+  // opts.diagnosticsDir is set; capped so a bad stretch cannot fill the disk.
+  dumpMismatch(predicted, st) {
+    const dir = this.opts.diagnosticsDir;
+    if (!dir || (this.dumps = (this.dumps || 0) + 1) > 60) return;
+    try {
+      const fs = require('node:fs'), path = require('node:path');
+      fs.mkdirSync(dir, { recursive: true });
+      const stem = path.join(dir, `rapid-mismatch-${this.piecesPlaced}`);
+      const rows = m => m.map(r => r.map(v => (v ? '#' : '.')).join(''));
+      fs.writeFileSync(stem + '.json', JSON.stringify({ piece: this.piecesPlaced, at: new Date().toISOString(),
+        stageUps: this.stageUps, predicted: rows(predicted), actual: rows(st.stackFilled),
+        current: st.current, queue: st.queue, hold: st.hold }, null, 1));
+      if (st.buf && st.buf.data) fs.writeFileSync(stem + '.jpg', require('jpeg-js').encode(
+        { data: st.buf.data, width: st.buf.width, height: st.buf.height }, 90).data);
+    } catch (e) {}
+  }
+
   // Fast per-turn capture (clipped JPEG) decoded to a pngjs-like image.
   async grab() {
     return this.t.captureRegion(this.clip, this.opts.jpegQuality);
@@ -378,7 +396,7 @@ class ZenBot {
           for (let retry = 0; !st.transition && !this.stop; retry++) {
             const actual = st.stackFilled.map(r => r.map(Boolean));
             if (matricesEqual(predicted.slice(4), actual.slice(4))) break;
-            if (retry === 1) { this.mispredicts++; break; }
+            if (retry === 1) { this.mispredicts++; this.dumpMismatch(predicted, st); break; }
             this.transientReads++;
             st = await this.readState(); mvReady = false;
           }
