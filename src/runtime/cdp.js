@@ -40,6 +40,16 @@ const preciseSleep = (ms) => new Promise((res) => {
   if (coarse > 0) setTimeout(spin, coarse); else setImmediate(spin);
 });
 
+// Chromium serves a CLIPPED captureScreenshot by resizing the page view for the duration of the
+// capture and restoring it afterwards. If that capture is abandoned (its connection closes while
+// it is in flight) or overlaps a capture from another connection, the restore is lost and the
+// page stays at the clip's scaled size (e.g. 194x215) until the app restarts — the game lays its
+// next stage out in that corner and the field can no longer be read. TURBO's separate capture
+// connection plus a capture that outlives our timeout (a stage load makes captures slow) hit
+// exactly that. So captures across ALL connections of this process run one at a time, each
+// waiting until Chromium has ANSWERED the previous one, not merely until it timed out on our side.
+let captureChain = Promise.resolve();
+
 class Tetrio {
   constructor(client) {
     this.client = client;
@@ -121,11 +131,24 @@ class Tetrio {
     return r.result.value;
   }
 
+  // One gated capture (see captureChain). The timeout covers the wait for earlier captures too,
+  // so a wedged one still turns into a fast failure; a capture whose caller already gave up
+  // before its turn is skipped instead of piling stale work onto the renderer.
+  _capture(opts, timeoutMs) {
+    let abandoned = false;
+    const answered = captureChain.then(() => {
+      if (abandoned || this.closing) throw new Error('capture abandoned');
+      return this.client.Page.captureScreenshot(opts);
+    });
+    captureChain = this.pendingCapture = answered.catch(() => {});
+    return withTimeout(answered, timeoutMs, 'captureScreenshot').catch(e => { abandoned = true; throw e; });
+  }
+
   // Full-viewport or clipped screenshot -> PNG Buffer
   async screenshot(clip = null, { timeoutMs = 8000 } = {}) {
     const opts = { format: 'png', optimizeForSpeed: true };
     if (clip) opts.clip = { x: clip.x, y: clip.y, width: clip.w, height: clip.h, scale: clip.scale || 1 };
-    const shot = await withTimeout(this.client.Page.captureScreenshot(opts), timeoutMs, 'captureScreenshot');
+    const shot = await this._capture(opts, timeoutMs);
     return Buffer.from(shot.data, 'base64');
   }
 
@@ -135,7 +158,7 @@ class Tetrio {
   async captureRegion(clip = null, quality = 85, { timeoutMs = 8000 } = {}) {
     const opts = { format: 'jpeg', quality };
     if (clip) opts.clip = { x: clip.x, y: clip.y, width: clip.w, height: clip.h, scale: clip.scale || 1 };
-    const shot = await withTimeout(this.client.Page.captureScreenshot(opts), timeoutMs, 'captureScreenshot');
+    const shot = await this._capture(opts, timeoutMs);
     const raw = jpeg.decode(Buffer.from(shot.data, 'base64'), { useTArray: true, formatAsRGBA: true });
     return { width: raw.width, height: raw.height, data: raw.data };
   }
@@ -236,6 +259,9 @@ class Tetrio {
       try {
         await Promise.allSettled([...this.pressedKeys].map(name => this.keyUp(name)));
         await this.stopKeepAwake();
+        // Never close under an unanswered capture (see captureChain). Bounded: a wedged renderer
+        // may never answer, and the supervisor restarts the app in that case anyway.
+        await withTimeout(this.pendingCapture || Promise.resolve(), 10000, 'capture drain').catch(() => {});
       } finally { await this.client.close(); }
     })();
     return this.closePromise;

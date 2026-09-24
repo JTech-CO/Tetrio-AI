@@ -114,7 +114,7 @@ async function bootstrap(bot, sequence) {
 }
 
 async function waitForStableState(bot, capture, sequence) {
-  const deadline = performance.now() + 10000;
+  const deadline = performance.now() + (bot.opts.settleTimeoutMs || 10000);
   let previous = null, stableReads = 0;
   while (!bot.stop && performance.now() < deadline) {
     const obs = await observe(bot, capture, sequence, true);
@@ -126,7 +126,9 @@ async function waitForStableState(bot, capture, sequence) {
     } else { previous = null; stableReads = 0; }
     await sleep(100);
   }
-  throw new Error('ZEN level transition did not settle');
+  // A new stage can take tens of seconds to become readable again. TURBO sends nothing while
+  // it waits, whereas RAPID keeps playing through it — so let RAPID bridge it and come back.
+  throw Object.assign(new Error('ZEN level transition did not settle'), { resumable: true });
 }
 
 // Separate from the legacy read-every-turn loop. There is at most one observation in
@@ -240,7 +242,11 @@ async function runTurbo(bot, { maxPieces = Infinity, maxMs = Infinity, onTurn = 
       }
       const entry = plans.shift();
       if (!entry || entry.sequence !== state.sequence) throw new Error('prediction queue exhausted or stale');
-      if (Math.max(...state.board.heights()) >= 12) throw new Error('high stack requires RAPID observation');
+      if (Math.max(...state.board.heights()) >= 12) {
+        // Not a timing failure: RAPID takes the stretch where every piece needs a fresh look,
+        // and hands back once the stack is low again (bot.js TURBO_RESUME_HEIGHT).
+        throw Object.assign(new Error('high stack requires RAPID observation'), { resumable: true });
+      }
       if (bot.stop || bot.pendingMode || remainingMs() <= 0) break;
       let executed;
       try { executed = await executor.execute(entry.plan, { startAt: readyAt, shouldStop: () => bot.stop }); }
@@ -302,6 +308,9 @@ async function runTurbo(bot, { maxPieces = Infinity, maxMs = Infinity, onTurn = 
     if (!bot.stop) {
       metrics.fallbackReason = e.message;
       console.warn('[TURBO → RAPID]', e.message);
+      // Only an automatic handoff comes back; a mode the user picked meanwhile stays picked.
+      bot.resumeTurbo = !!e.resumable && !bot.pendingMode;
+      bot.fellBackAt = bot.piecesPlaced;
       bot.pendingMode = bot.pendingMode || bot.opts.turboFallback;
       bot.current = null; bot.lastPredicted = null;
     }

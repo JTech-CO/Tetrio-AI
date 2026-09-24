@@ -129,8 +129,10 @@ test('observer rejects stale sequences, board drift, queue shifts and wrong HOLD
   assert.equal(matches(state, good), false); // top rows are NOT blindly ignored
 });
 
-function fakeBot({ captureError = false, mismatch = false, transitionAt = null } = {}) {
+function fakeBot({ captureError = false, mismatch = false, transitionAt = null, transitionFor = 1, startRows = 0 } = {}) {
   let board = new Board(), current = 'T', hold = null, rot = 0, col = PIECES.T.spawnCol;
+  if (startRows) board = Board.fromMatrix(Array.from({ length: 20 }, (_, y) =>
+    Array.from({ length: 10 }, (_, x) => y >= 20 - startRows && x > 0)));
   let queue = ['I', 'S', 'Z', 'J', 'L'], n = 0;
   const bag = ['T', 'I', 'S', 'Z', 'J', 'L', 'O'];
   const held = new Set(), captures = [];
@@ -156,7 +158,8 @@ function fakeBot({ captureError = false, mismatch = false, transitionAt = null }
       try {
         await new Promise(r => setTimeout(r, 5));
         if (captureError) throw new Error('capture timeout');
-        const transition = transitionAt != null && captures.length === transitionAt;
+        const transition = transitionAt != null && captures.length >= transitionAt
+          && captures.length < transitionAt + transitionFor;
         if (transition) { board = new Board(); current = consume(); hold = null; spawn(); showCurrent = true; }
         const matrix = visible(board);
         if (showCurrent) for (const [x, y] of require('../src/vision/pieces').CANON[current]) matrix[y + 1][x + 3] = true;
@@ -225,6 +228,23 @@ test('a level transition at the finite run boundary is settled and counted as un
   assert.equal(bot.turboStats.suspectPieces, 1);
   assert.equal(bot.turboStats.fallbackReason, null);
 });
+test('a stage transition that does not settle hands over to RAPID and is marked to come back', async () => {
+  const { bot, held } = fakeBot({ transitionAt: 1, transitionFor: 10000 });
+  bot.opts.settleTimeoutMs = 300;
+  await runTurbo(bot, { maxPieces: 6, maxMs: 5000 });
+  assert.equal(bot.turboStats.fallbackReason, 'ZEN level transition did not settle');
+  assert.equal(bot.pendingMode, 'RAPID');
+  assert.equal(bot.resumeTurbo, true);
+  assert.equal(held.size, 0);
+});
+test('a high stack hands over to RAPID and is marked to come back to TURBO', async () => {
+  const { bot, held } = fakeBot({ startRows: 12 });
+  await runTurbo(bot, { maxPieces: 6, maxMs: 5000 });
+  assert.equal(bot.turboStats.fallbackReason, 'high stack requires RAPID observation');
+  assert.equal(bot.pendingMode, 'RAPID');
+  assert.equal(bot.resumeTurbo, true);
+  assert.equal(held.size, 0);
+});
 test('capture failure and consecutive mismatches queue RAPID fallback and release keys', async () => {
   for (const scenario of [{ captureError: true }, { mismatch: true }]) {
     const { bot, held } = fakeBot(scenario);
@@ -232,6 +252,7 @@ test('capture failure and consecutive mismatches queue RAPID fallback and releas
     assert.equal(bot.pendingMode, 'RAPID');
     assert.ok(bot.piecesPlaced < 6);
     assert.ok(bot.turboStats.fallbackReason);
+    assert.equal(bot.resumeTurbo, false, 'a timing failure does not come back on its own');
     assert.equal(held.size, 0);
     if (scenario.mismatch) {
       assert.equal(bot.turboStats.fallbackReason, 'consecutive verification mismatches');

@@ -1,9 +1,18 @@
 'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
 
 // Use the game's existing settings controls, not its internal board/queue state.
 // Only visual effects that invalidate fixed pixel coordinates are changed. Restore
 // the user's settings when leaving TURBO, including on failed calibration.
 const VIDEO_PROFILE = { bounciness: 0, shakiness: 0, actiontext: 'off' };
+// While the effects are pinned, the user's own values are journaled here and a completed restore
+// deletes the journal. Finding the game pinned WITH a journal means a restore was lost (a dropped
+// connection, a killed process) and the journal holds the user's values — reading the game then
+// would take the PINNED values for the user's own and "restore" those for good. Pinned WITHOUT a
+// journal means the user chose these values themselves.
+const JOURNAL = path.resolve(__dirname, '../../probe/video-original.json');
+const isPinned = v => Object.keys(VIDEO_PROFILE).every(k => v[k] === VIDEO_PROFILE[k]);
 
 async function readVideo(t) {
   return t.eval(`(() => {
@@ -31,11 +40,15 @@ async function writeVideo(t, values) {
   })()`);
 }
 
-async function acquireTurboEnvironment(t) {
-  const before = await readVideo(t);
+async function acquireTurboEnvironment(t, { journal = JOURNAL } = {}) {
+  let before = await readVideo(t);
+  if (isPinned(before)) { try { before = JSON.parse(fs.readFileSync(journal, 'utf8')); } catch (e) {} }
+  else { try { fs.writeFileSync(journal, JSON.stringify(before)); } catch (e) {} }
   let restored = false;
   const restore = async () => {
-    if (!restored) { await writeVideo(t, before); restored = true; }
+    if (restored) return;
+    await writeVideo(t, before); restored = true;
+    try { fs.unlinkSync(journal); } catch (e) {}
   };
   try {
     const after = await writeVideo(t, VIDEO_PROFILE);

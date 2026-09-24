@@ -126,7 +126,8 @@ test('supervisor stops with failure after eight no-progress gameplay errors, inc
       global.setTimeout = (f, ms, ...args) => timer(f, Math.min(ms, 1), ...args);
       require('./src/runtime/launch-app').ensureTetrio = async () => ({ reused: true, version: { Browser: 'fake' } });
       require('./src/runtime/cdp').Tetrio.connect = async () => ({ keepCompositorAwake: async () => {},
-        stopKeepAwake: async () => {}, screenshot: async () => ({}), close: async () => {} });
+        stopKeepAwake: async () => {}, screenshot: async () => ({}), close: async () => {},
+        viewport: async () => ({ w: 1295, h: 997, dpr: 2 }) });
       require('./src/runtime/focus').applyFocusSpoof = async () => {};
       require('./src/vision/vision').Vision.detectFrame = () => ({});
       const Bot = require('./src/bot').ZenBot;
@@ -169,4 +170,57 @@ test('a persistent mismatch costs one re-read, not a retry chain on the critical
   assert.equal(reads, 2);
   assert.equal(bot.mispredicts, 1);
   assert.equal(bot.transientReads, 1);
+});
+
+test('RAPID bridges a few clean pieces, then hands back to TURBO only once the stack is low', async () => {
+  // Rows with a hole in column 0 so none is complete.
+  const stack = h => Array.from({ length: 20 }, (_, y) =>
+    Array.from({ length: 10 }, (_, x) => (y >= 20 - h && x > 0) ? 'I' : null));
+  const run = async (height, maxPieces) => {
+    const bot = new ZenBot({}, { postDropMs: 0 });
+    bot.resumeTurbo = true; bot.fellBackAt = 0;
+    let inputs = 0;
+    bot.readState = async () => ({ current: 'T', queue: ['I', 'O'], hold: null, stackFilled: stack(height) });
+    bot.runKeys = async () => { inputs++; return true; };
+    await bot.runLegacy({ maxPieces, maxMs: 2000 });
+    return { bot, inputs };
+  };
+  const high = await run(10, 6);
+  assert.equal(high.inputs, 6, 'still high: RAPID keeps playing');
+  assert.ok(!high.bot.pendingMode);
+  assert.equal(high.bot.resumeTurbo, true);
+  const low = await run(4, 10);
+  assert.equal(low.inputs, 3, 'RAPID bridges three pieces, then TURBO plays the next one');
+  assert.equal(low.bot.pendingMode, 'TURBO');
+  assert.equal(low.bot.resumeTurbo, false);
+});
+
+// Chromium resizes the page for a clipped capture; overlapping or abandoned captures leave it
+// stuck at the clip size. Captures must be answered one at a time across connections.
+function captureClient(name, ms, log) {
+  return { Page: { async captureScreenshot() {
+    log.push(name + '+'); await new Promise(r => setTimeout(r, ms)); log.push(name + '-'); return { data: '' };
+  } }, Input: { async dispatchKeyEvent() {} }, async close() { log.push(name + ' close'); } };
+}
+test('captures from different connections never overlap, even after one timed out on our side', async () => {
+  const log = [];
+  const a = new Tetrio(captureClient('a', 40, log)), b = new Tetrio(captureClient('b', 5, log));
+  await assert.rejects(a.screenshot(null, { timeoutMs: 10 }), /timeout/);
+  await b.screenshot();
+  assert.deepEqual(log, ['a+', 'a-', 'b+', 'b-']);
+});
+test('closing a connection waits for its unanswered capture before dropping the socket', async () => {
+  const log = [];
+  const t = new Tetrio(captureClient('t', 30, log));
+  t.screenshot().catch(() => {});
+  await new Promise(r => setTimeout(r, 1));
+  await t.close();
+  assert.deepEqual(log, ['t+', 't-', 't close']);
+});
+test('a page view stuck at the capture size is reported as degradation for an immediate restart', async () => {
+  const bot = new ZenBot({ viewport: async () => ({ w: 194, h: 215, dpr: 2 }) });
+  bot.calViewport = { w: 1295, h: 997, dpr: 2 };
+  await assert.rejects(bot.assertViewport(), e => e.degraded === true);
+  bot.t.viewport = async () => ({ w: 1295, h: 997, dpr: 2 });
+  await bot.assertViewport();
 });

@@ -2,7 +2,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { acquireTurboEnvironment, readVideo } = require('../src/runtime/turbo-environment');
+const tempJournal = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'video-')), 'original.json');
 const { validateCalibration } = require('../src/input/calibration');
 
 function fakeSettings() {
@@ -26,7 +30,7 @@ function fakeSettings() {
 test('visual lease handles string-valued sliders and restores the original settings exactly once', async () => {
   const f = fakeSettings();
   const original = JSON.stringify(f.config);
-  const lease = await acquireTurboEnvironment(f.t);
+  const lease = await acquireTurboEnvironment(f.t, { journal: tempJournal() });
   assert.deepEqual(await readVideo(f.t), { bounciness: 0, shakiness: 0, actiontext: 'off' });
   assert.equal(f.config.video.background, 0.7);
   assert.deepEqual(f.config.handling, { arr: 2, das: 9 });
@@ -40,8 +44,26 @@ test('visual lease handles string-valued sliders and restores the original setti
 test('a partially applied visual profile is rolled back if a later control is unavailable', async () => {
   const f = fakeSettings();
   delete f.controls.video_actiontext_off;
-  await assert.rejects(acquireTurboEnvironment(f.t), /Missing video setting/);
+  await assert.rejects(acquireTurboEnvironment(f.t, { journal: tempJournal() }), /Missing video setting/);
   assert.deepEqual(await readVideo(f.t), { bounciness: 1, shakiness: 1, actiontext: 'all' });
+});
+
+test('a restore lost to a dropped connection is recovered from the journal, not from the pinned game', async () => {
+  const f = fakeSettings(), journal = tempJournal();
+  await acquireTurboEnvironment(f.t, { journal }); // pinned, then the connection "drops": no restore
+  const next = await acquireTurboEnvironment(f.t, { journal });
+  assert.deepEqual(next.before, { bounciness: 1, shakiness: 1, actiontext: 'all' });
+  await next.restore();
+  assert.deepEqual(await readVideo(f.t), { bounciness: 1, shakiness: 1, actiontext: 'all' });
+  assert.equal(fs.existsSync(journal), false, 'a completed restore clears the journal');
+});
+
+test('effects the user switched off themselves stay off after the lease', async () => {
+  const f = fakeSettings();
+  Object.assign(f.config.video, { bounciness: '0', shakiness: '0', actiontext: 'off' });
+  const lease = await acquireTurboEnvironment(f.t, { journal: tempJournal() });
+  await lease.restore();
+  assert.deepEqual(await readVideo(f.t), { bounciness: 0, shakiness: 0, actiontext: 'off' });
 });
 
 test('calibration rejects a visual profile that the runtime cannot reproduce', () => {

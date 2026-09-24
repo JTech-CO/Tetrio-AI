@@ -146,6 +146,7 @@ async function main() {
     }
     modeName = name;
     if (currentBot) {
+      currentBot.resumeTurbo = false; // an explicit choice overrides TURBO's pending return
       currentBot.setMode(name);
     }
     recentTimes = [];
@@ -246,6 +247,14 @@ async function main() {
 
       t = await Tetrio.connect({ port: args.port });
       activeT = t;
+      // A process killed mid-capture can leave the page view stuck at the capture's clip size
+      // (see captureChain in cdp.js): the game is drawn in a tiny corner, ZEN can't be detected,
+      // and the first-launch ZEN wait would never end. Only an app restart restores the view.
+      const vp0 = await t.viewport();
+      if (vp0.w < 400 || vp0.h < 300) {
+        const e = new Error(`DEGRADED: 페이지 화면이 ${vp0.w}x${vp0.h}로 굳어 있음 — 앱 재시작 필요`);
+        e.degraded = true; throw e;
+      }
       await applyFocusSpoof(t);
       if (args.adblock) {
         await applyAdblock(t);
@@ -334,6 +343,7 @@ async function main() {
       // otherwise this was a pit-stop cap -> restart to refresh the renderer, then continue.
       totalPieces += bot.piecesPlaced; totalLines += bot.linesEstimate;
       totalStageUps += bot.stageUps; totalResyncs += bot.resyncs; totalMispredicts += bot.mispredicts;
+      if (bot.resumeTurbo) modeName = 'TURBO'; // a pit-stop mid-handoff must not strand RAPID
       await restoreVisuals(bot);
       currentBot = null;
       try { await t.close(); } catch {}
@@ -344,6 +354,7 @@ async function main() {
     } catch (e) {
       await restoreVisuals(currentBot);
       if (currentBot) {
+        if (currentBot.resumeTurbo) modeName = 'TURBO';
         totalPieces += currentBot.piecesPlaced; totalLines += currentBot.linesEstimate;
         totalStageUps += currentBot.stageUps; totalResyncs += currentBot.resyncs;
         totalMispredicts += currentBot.mispredicts; currentBot = null;

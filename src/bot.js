@@ -34,6 +34,13 @@ const DEFAULTS = {
   aiBeam: 0,           // depth-2 child search only for top-N placements (0 = full search)
 };
 
+// TURBO hands RAPID a high stack or an unsettled stage transition. Take it back only once
+// RAPID has placed a few pieces cleanly (the stretch is really over) and the stack is well
+// below TURBO's limit of 12, so the two never flap at the boundary.
+const TURBO_RESUME_HEIGHT = 6;
+const TURBO_RESUME_AFTER = 3;
+const stackHeight = rows => { const top = rows.findIndex(r => r.some(Boolean)); return top < 0 ? 0 : rows.length - top; };
+
 class ZenBot {
   constructor(t, opts = {}) {
     this.t = t;
@@ -132,6 +139,7 @@ class ZenBot {
     this.absCal = abs;
 
     const vp = await this.t.viewport();
+    this.calViewport = vp;
     const dpr = Math.max(1, Math.round(abs.screenshotW / vp.w)); // usually 2
     const cw = (abs.fieldRight - abs.fieldLeft) / abs.cols;
     const fieldTop = abs.fieldBottom - abs.rows * cw;
@@ -158,6 +166,22 @@ class ZenBot {
     this.vision = new Vision(this.cal);
     this.dpr = dpr;
     return this.cal;
+  }
+
+  // A clipped capture interrupted outside this process (see captureChain in cdp.js) can leave
+  // the page view stuck at the clip's size: the field becomes unreadable and only an app
+  // restart restores it. Report it as degradation so the supervisor restarts now, not after
+  // the 60s idle deadline.
+  async assertViewport() {
+    if (!this.calViewport) return;
+    let vp;
+    try { vp = await this.t.viewport(); } catch (e) { return; }
+    if (vp.w < this.calViewport.w * 0.7 || vp.h < this.calViewport.h * 0.7) {
+      const e = new Error(`DEGRADED: 페이지 화면이 ${vp.w}x${vp.h}로 줄어듦 `
+        + `(보정 시 ${this.calViewport.w}x${this.calViewport.h}) — 앱 재시작 필요`);
+      e.degraded = true;
+      throw e;
+    }
   }
 
   // Fast per-turn capture (clipped JPEG) decoded to a pngjs-like image.
@@ -360,10 +384,18 @@ class ZenBot {
           }
           this.lastPredicted = null;
         }
+        // TURBO handed a stretch to RAPID (turbo.js); give it back once it is over.
+        if (this.resumeTurbo && !st.transition && this.piecesPlaced - (this.fellBackAt || 0) >= TURBO_RESUME_AFTER
+            && stackHeight(st.stackFilled) <= TURBO_RESUME_HEIGHT) {
+          console.warn(`[RAPID → TURBO] 스택 ${stackHeight(st.stackFilled)}줄 — TURBO로 복귀`);
+          this.resumeTurbo = false; this.pendingMode = 'TURBO';
+          break;
+        }
         const cur = st.current;
         const queueBefore = knownQueue(st.queue);
         if (!cur || !queueBefore.length) { // wait for a trustworthy current/NEXT prefix
           idle++;
+          if (idle === 1) await this.assertViewport();
           if (!idleSince) idleSince = Date.now();
           // Independent liveness deadline: if we can't read a piece for this long straight, the
           // screen is stuck in a way per-turn reads won't fix (a warm-but-unreadable overlay,
