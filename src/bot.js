@@ -39,6 +39,9 @@ const DEFAULTS = {
 // below TURBO's limit of 12, so the two never flap at the boundary.
 const TURBO_RESUME_HEIGHT = 6;
 const TURBO_RESUME_AFTER = 3;
+// Each slow-capture fallback doubles the bridge (3, 6, 12, ...): occasional jitter comes back
+// quickly, a window that is slow for good mostly stays in RAPID instead of flapping.
+const resumeBridge = slowCaptures => Math.min(200, TURBO_RESUME_AFTER * 2 ** Math.max(0, slowCaptures - 1));
 const stackHeight = rows => { const top = rows.findIndex(r => r.some(Boolean)); return top < 0 ? 0 : rows.length - top; };
 
 class ZenBot {
@@ -403,7 +406,8 @@ class ZenBot {
           this.lastPredicted = null;
         }
         // TURBO handed a stretch to RAPID (turbo.js); give it back once it is over.
-        if (this.resumeTurbo && !st.transition && this.piecesPlaced - (this.fellBackAt || 0) >= TURBO_RESUME_AFTER
+        if (this.resumeTurbo && !st.transition
+            && this.piecesPlaced - (this.fellBackAt || 0) >= resumeBridge(this.slowCaptures || 0)
             && stackHeight(st.stackFilled) <= TURBO_RESUME_HEIGHT) {
           console.warn(`[RAPID → TURBO] 스택 ${stackHeight(st.stackFilled)}줄 — TURBO로 복귀`);
           this.resumeTurbo = false; this.pendingMode = 'TURBO';

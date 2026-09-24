@@ -176,9 +176,9 @@ test('RAPID bridges a few clean pieces, then hands back to TURBO only once the s
   // Rows with a hole in column 0 so none is complete.
   const stack = h => Array.from({ length: 20 }, (_, y) =>
     Array.from({ length: 10 }, (_, x) => (y >= 20 - h && x > 0) ? 'I' : null));
-  const run = async (height, maxPieces) => {
+  const run = async (height, maxPieces, slowCaptures = 0) => {
     const bot = new ZenBot({}, { postDropMs: 0 });
-    bot.resumeTurbo = true; bot.fellBackAt = 0;
+    bot.resumeTurbo = true; bot.fellBackAt = 0; bot.slowCaptures = slowCaptures;
     let inputs = 0;
     bot.readState = async () => ({ current: 'T', queue: ['I', 'O'], hold: null, stackFilled: stack(height) });
     bot.runKeys = async () => { inputs++; return true; };
@@ -193,6 +193,10 @@ test('RAPID bridges a few clean pieces, then hands back to TURBO only once the s
   assert.equal(low.inputs, 3, 'RAPID bridges three pieces, then TURBO plays the next one');
   assert.equal(low.bot.pendingMode, 'TURBO');
   assert.equal(low.bot.resumeTurbo, false);
+  // Repeated slow captures double the bridge so a slow window does not flap.
+  assert.equal((await run(4, 20, 1)).inputs, 3);
+  assert.equal((await run(4, 20, 2)).inputs, 6);
+  assert.equal((await run(4, 20, 3)).inputs, 12);
 });
 
 // Chromium resizes the page for a clipped capture; overlapping or abandoned captures leave it

@@ -45,8 +45,15 @@ function fieldView(bot) {
 async function observe(bot, capture, sequence, full) {
   const started = performance.now();
   const view = full ? { clip: bot.clip, vision: bot.vision } : fieldView(bot);
-  const image = await capture.captureRegion(view.clip, bot.opts.jpegQuality,
-    { timeoutMs: bot.opts.verifyTimeoutMs });
+  let image;
+  try {
+    image = await capture.captureRegion(view.clip, bot.opts.jpegQuality, { timeoutMs: bot.opts.verifyTimeoutMs });
+  } catch (e) {
+    // One slow frame (renderer jitter) must not end TURBO for the whole session. bot.js backs
+    // the hand-back off each time, so a persistently slow window mostly stays in RAPID.
+    if (/timeout/.test(e.message)) Object.assign(e, { resumable: true, slowCapture: true });
+    throw e;
+  }
   const extracted = extractCurrentPiece(view.vision.readBoard(image).filled);
   return { sequence, full, stackFilled: extracted.stackFilled,
     transition: full && !!view.vision.readLevelTransition?.(image),
@@ -311,6 +318,7 @@ async function runTurbo(bot, { maxPieces = Infinity, maxMs = Infinity, onTurn = 
       // Only an automatic handoff comes back; a mode the user picked meanwhile stays picked.
       bot.resumeTurbo = !!e.resumable && !bot.pendingMode;
       bot.fellBackAt = bot.piecesPlaced;
+      if (e.slowCapture) bot.slowCaptures = (bot.slowCaptures || 0) + 1;
       bot.pendingMode = bot.pendingMode || bot.opts.turboFallback;
       bot.current = null; bot.lastPredicted = null;
     }

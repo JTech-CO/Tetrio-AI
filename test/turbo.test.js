@@ -252,7 +252,9 @@ test('capture failure and consecutive mismatches queue RAPID fallback and releas
     assert.equal(bot.pendingMode, 'RAPID');
     assert.ok(bot.piecesPlaced < 6);
     assert.ok(bot.turboStats.fallbackReason);
-    assert.equal(bot.resumeTurbo, false, 'a timing failure does not come back on its own');
+    // A slow capture is jitter and comes back (with a growing bridge); mismatches do not.
+    assert.equal(bot.resumeTurbo, !!scenario.captureError);
+    assert.equal(bot.slowCaptures || 0, scenario.captureError ? 1 : 0);
     assert.equal(held.size, 0);
     if (scenario.mismatch) {
       assert.equal(bot.turboStats.fallbackReason, 'consecutive verification mismatches');
