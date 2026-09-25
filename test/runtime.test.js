@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const { Tetrio } = require('../src/runtime/cdp');
 const { ZenBot } = require('../src/bot');
-const { MODES } = require('../src/modes');
+const { MODES, resolveStrategy } = require('../src/modes');
 const { parseArgs } = require('../src/run');
 const empty = () => Array.from({ length: 20 }, () => Array(10).fill(null));
 
@@ -118,6 +118,37 @@ test('CLI rejects invalid, missing and unknown arguments before connecting to th
   assert.equal(args.restartMins, 0.5);
   assert.equal(args.postdrop, 0);
   assert.equal(args.mode, 'RAPID');
+});
+test('line-clear strategy: CLI flag, console aliases, and it survives a mode switch', () => {
+  assert.equal(parseArgs(['node', 'run.js']).strategy, 'SINGLE');
+  assert.equal(parseArgs(['node', 'run.js', '--strategy', 'quad']).strategy, 'QUAD');
+  assert.throws(() => parseArgs(['node', 'run.js', '--strategy', 'triple']));
+  assert.equal(resolveStrategy(' Quad '), 'QUAD');
+  assert.equal(resolveStrategy('쿼드'), 'QUAD');
+  assert.equal(resolveStrategy('싱글'), 'SINGLE');
+  assert.equal(resolveStrategy('3'), null, 'mode numbers stay modes');
+  const bot = new ZenBot({}, { ...MODES.RAPID.opts, mode: 'RAPID', strategy: 'QUAD' });
+  bot.setMode('BASIC');
+  assert.equal(bot.opts.strategy, 'QUAD');
+  assert.equal(bot.setStrategy('nope'), null);
+  bot.setStrategy('single');
+  assert.equal(bot.opts.strategy, 'SINGLE');
+});
+test('the play loop decides with the current strategy and counts quads', async () => {
+  // Columns 0-8 filled in the bottom row: SINGLE clears it with the I, QUAD keeps the well open.
+  const oneReady = () => empty().map((r, y) => r.map((_, x) => (y === 19 && x < 9 ? 'I' : null)));
+  const play = async (strategy) => {
+    const bot = new ZenBot({}, { postDropMs: 0, strategy });
+    bot.readState = async () => ({ current: 'I', queue: ['T', 'O', 'S'], hold: null, stackFilled: oneReady() });
+    bot.runKeys = async () => true;
+    await bot.runLegacy({ maxPieces: 1, maxMs: 1000 });
+    return bot;
+  };
+  assert.equal((await play('SINGLE')).linesEstimate, 1);
+  assert.equal((await play('QUAD')).linesEstimate, 0);
+  const bot = new ZenBot({});
+  bot.countClear(4); bot.countClear(1);
+  assert.deepEqual([bot.linesEstimate, bot.quads], [5, 1]);
 });
 test('supervisor stops with failure after eight no-progress gameplay errors, including degradation', () => {
   for (const degraded of [false, true]) {

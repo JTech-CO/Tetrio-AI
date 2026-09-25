@@ -3,15 +3,16 @@
 // blocking, wait until a ZEN game is on screen, then play continuously.
 //
 // Usage:
-//   node src/run.js [--mode basic|rapid] [--pieces N] [--port 9222] [--restart]
-//                   [--no-adblock] [--quality 85] [--postdrop N]
+//   node src/run.js [--mode basic|rapid|turbo] [--strategy single|quad] [--pieces N]
+//                   [--port 9222] [--restart] [--no-adblock] [--quality 85] [--postdrop N]
 //
 // By default it REUSES an already-running TETR.IO (preserving your ZEN session). Enter
 // ZEN mode yourself first; the bot detects the board and starts playing.
 //
 // MODES are selected/switched from THIS console window (no in-game overlay):
 // a menu is shown once the ZEN field is detected, and during play you can type
-// `1`/`basic` or `2`/`rapid` + Enter at any time to switch live.
+// `1`/`basic`, `2`/`rapid` or `3`/`turbo` + Enter at any time to switch live. The line-clear
+// strategy is a separate axis, switched the same way with `single` / `quad` (src/modes.js).
 
 const readline = require('readline');
 const { ensureTetrio } = require('./runtime/launch-app.js');
@@ -20,7 +21,7 @@ const { applyFocusSpoof } = require('./runtime/focus.js');
 const { applyAdblock, applyCosmetics, sweepAds } = require('./runtime/adblock.js');
 const { Vision } = require('./vision/vision.js');
 const { ZenBot } = require('./bot.js');
-const { MODES, resolveMode } = require('./modes.js');
+const { MODES, resolveMode, STRATEGIES, resolveStrategy } = require('./modes.js');
 const { enterZen } = require('./runtime/navigate.js');
 const { acquireTurboEnvironment } = require('./runtime/turbo-environment.js');
 
@@ -30,7 +31,7 @@ function parseArgs(argv) {
   // re-entering ZEN every `restartEvery` pieces OR `restartMins` minutes, whichever first.
   // ZEN is account-saved and auto-resumes on relaunch, so a restart loses nothing.
   const a = { port: 9222, pieces: Infinity, restart: false, adblock: true, quality: 85,
-              postdrop: null, mode: 'BASIC', restartEvery: 2500, restartMins: 20 };
+              postdrop: null, mode: 'BASIC', strategy: 'SINGLE', restartEvery: 2500, restartMins: 20 };
   for (let i = 2; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--restart') { a.restart = true; continue; }
@@ -39,12 +40,15 @@ function parseArgs(argv) {
       '--quality': ['quality', 1, 100], '--postdrop': ['postdrop', 0, Number.MAX_SAFE_INTEGER],
       '--restart-every': ['restartEvery', 0, Number.MAX_SAFE_INTEGER],
       '--restart-mins': ['restartMins', 0, Number.MAX_SAFE_INTEGER] };
-    if (!fields[k] && k !== '--mode' && k !== '--calibration') throw new Error('Unknown option: ' + k);
+    if (!fields[k] && k !== '--mode' && k !== '--strategy' && k !== '--calibration') throw new Error('Unknown option: ' + k);
     const value = argv[++i];
     if (!value || value.startsWith('--')) throw new Error('Missing value for ' + k);
     if (k === '--mode') {
       a.mode = resolveMode(value);
       if (!a.mode) throw new Error('Unknown mode: ' + value);
+    } else if (k === '--strategy') {
+      a.strategy = resolveStrategy(value);
+      if (!a.strategy) throw new Error('Unknown strategy: ' + value);
     } else if (k === '--calibration') a.calibrationPath = value;
     else {
       const [field, min, max] = fields[k], n = Number(value);
@@ -97,11 +101,15 @@ async function reachZen(t, { allowManualWait = false } = {}) {
   }
 }
 
-function printModeMenu(current) {
+function printModeMenu(current, strategy) {
   console.log('\n── 모드 선택 ─────────────────────────────────────────────');
   Object.values(MODES).forEach((m, i) => {
     const mark = m.key === current ? '▶' : ' ';
     console.log(` ${mark} [${i + 1}] ${m.label}`);
+  });
+  console.log('  라인 클리어 방식 (모드와 별개, 어느 모드에서나):');
+  Object.values(STRATEGIES).forEach((s) => {
+    console.log(` ${s.key === strategy ? '▶' : ' '} [${s.key.toLowerCase()}] ${s.label}`);
   });
   console.log('   플레이 중에도 이 창에 번호/이름 + Enter 로 언제든 전환됩니다.');
   console.log('──────────────────────────────────────────────────────────');
@@ -114,11 +122,12 @@ async function main() {
 
   const t0 = Date.now();
   let stop = false, exitCode = 0;
-  let totalPieces = 0, totalLines = 0, totalStageUps = 0, totalResyncs = 0, totalMispredicts = 0;
+  let totalPieces = 0, totalLines = 0, totalQuads = 0, totalStageUps = 0, totalResyncs = 0, totalMispredicts = 0;
   let currentBot = null;
   let activeT = null;         // the live CDP connection, visible to shutdown() BEFORE a bot
                               // exists (waitForZen / mode menu window) — zombie-app hazard
   let modeName = args.mode;   // chosen mode (updated from the console)
+  let strategyName = args.strategy; // line-clear strategy, carried across segments like the mode
   let modeAsked = false;      // startup menu is shown only once, on first ZEN detection
   let selectResolve = null;   // set while the startup menu is waiting for input
 
@@ -131,8 +140,9 @@ async function main() {
 
   const summary = () => {
     const secs = (Date.now() - t0) / 1000;
-    const live = currentBot || { piecesPlaced: 0, linesEstimate: 0, stageUps: 0, resyncs: 0, mispredicts: 0 };
-    return `${totalPieces + live.piecesPlaced} 피스, 라인(추정) ${totalLines + live.linesEstimate}, ` +
+    const live = currentBot || { piecesPlaced: 0, linesEstimate: 0, quads: 0, stageUps: 0, resyncs: 0, mispredicts: 0 };
+    return `${totalPieces + live.piecesPlaced} 피스, 라인(추정) ${totalLines + live.linesEstimate} ` +
+           `(쿼드 ${totalQuads + live.quads}), ` +
            `스테이지업 ${totalStageUps + live.stageUps}, 리싱크 ${totalResyncs + live.resyncs}, ` +
            `오배치(추정) ${totalMispredicts + live.mispredicts}, ${secs.toFixed(0)}s, ` +
            `${((totalPieces + live.piecesPlaced) / Math.max(1, secs)).toFixed(2)} 피스/초`;
@@ -151,6 +161,12 @@ async function main() {
     }
     recentTimes = [];
     console.log(`⇒ 모드 전환: ${MODES[name].label}`);
+  };
+
+  const applyStrategy = (name) => {
+    strategyName = name;
+    if (currentBot) currentBot.setStrategy(name);
+    console.log(`⇒ 라인 클리어 방식: ${STRATEGIES[name].label}`);
   };
 
   // The game's bounce/shake/action-text effects rescale and shake the field on every hard
@@ -206,10 +222,15 @@ async function main() {
       if (selectResolve) { const r = selectResolve; selectResolve = null; r(m); }
       else if (m !== modeName) applyMode(m);
       else console.log(`  (이미 ${m} 모드입니다)`);
+    } else if (resolveStrategy(cmd)) {
+      // Does not answer the startup menu, which keeps waiting for a mode.
+      const s = resolveStrategy(cmd);
+      if (s !== strategyName) applyStrategy(s);
+      else console.log(`  (이미 ${s} 방식입니다)`);
     } else if (cmd.toLowerCase() === 'status') {
       console.log('  ' + summary());
     } else {
-      console.log('  ? 명령: 1|basic, 2|rapid, 3|turbo, status');
+      console.log('  ? 명령: 1|basic, 2|rapid, 3|turbo, single|quad, status');
     }
   });
   rl.on('SIGINT', () => shutdown(0));
@@ -288,10 +309,10 @@ async function main() {
       console.log('  ✓ ZEN 화면 감지됨.');
       if (!modeAsked) {
         modeAsked = true;
-        printModeMenu(modeName);
+        printModeMenu(modeName, strategyName);
         modeName = await askMode(modeName);
       }
-      console.log(`  ▶ 플레이 시작 — 모드: ${MODES[modeName].label}`);
+      console.log(`  ▶ 플레이 시작 — 모드: ${MODES[modeName].label} · 방식: ${strategyName}`);
 
       // The per-window-size profile (and measuring a size that has none) is TURBO's own job at
       // its start, so a live switch to TURBO gets it too. Only an explicit file is checked here.
@@ -299,7 +320,7 @@ async function main() {
         try { require('./input/calibration').loadCalibration(args.calibrationPath); }
         catch (e) { console.warn('  ⚠ ' + e.message + ' — RAPID 로 진행합니다.'); modeName = 'RAPID'; }
       }
-      const botOpts = { ...MODES[modeName].opts, mode: modeName, jpegQuality: args.quality,
+      const botOpts = { ...MODES[modeName].opts, mode: modeName, strategy: strategyName, jpegQuality: args.quality,
         calibrationPath: args.calibrationPath,
         // Mismatch frames for diagnosis (RAPID and TURBO); off unless the variable is set.
         diagnosticsDir: process.env.TETRIO_DIAG_DIR || undefined };
@@ -334,7 +355,8 @@ async function main() {
           if ((base + r.piecesPlaced) % 20 === 0) {
             const secs = (Date.now() - t0) / 1000;
             const recent = recentPps();
-            console.log(`  [${bot.mode}] 피스 ${base + r.piecesPlaced} | 라인(추정) ${totalLines + r.linesEstimate} | ` +
+            console.log(`  [${bot.mode}·${bot.opts.strategy}] 피스 ${base + r.piecesPlaced} | ` +
+                        `라인(추정) ${totalLines + r.linesEstimate} (쿼드 ${totalQuads + bot.quads}) | ` +
                         `스테이지업 ${totalStageUps + r.stageUps} | 리싱크 ${totalResyncs + bot.resyncs} | ` +
                         `오배치(추정) ${totalMispredicts + r.mispredicts} | ` +
                         `평균 ${((base + r.piecesPlaced) / Math.max(1, secs)).toFixed(2)}/초` +
@@ -345,7 +367,7 @@ async function main() {
 
       // Segment ended: accumulate. If we've hit the piece target (or user stopped) we're done;
       // otherwise this was a pit-stop cap -> restart to refresh the renderer, then continue.
-      totalPieces += bot.piecesPlaced; totalLines += bot.linesEstimate;
+      totalPieces += bot.piecesPlaced; totalLines += bot.linesEstimate; totalQuads += bot.quads;
       totalStageUps += bot.stageUps; totalResyncs += bot.resyncs; totalMispredicts += bot.mispredicts;
       if (bot.resumeTurbo) modeName = 'TURBO'; // a pit-stop mid-handoff must not strand RAPID
       await restoreVisuals(bot);
@@ -359,7 +381,7 @@ async function main() {
       await restoreVisuals(currentBot);
       if (currentBot) {
         if (currentBot.resumeTurbo) modeName = 'TURBO';
-        totalPieces += currentBot.piecesPlaced; totalLines += currentBot.linesEstimate;
+        totalPieces += currentBot.piecesPlaced; totalLines += currentBot.linesEstimate; totalQuads += currentBot.quads;
         totalStageUps += currentBot.stageUps; totalResyncs += currentBot.resyncs;
         totalMispredicts += currentBot.mispredicts; currentBot = null;
       }

@@ -31,6 +31,7 @@ const DEFAULTS = {
   settleMs: 60,        // pipelined: wait before capturing (stack must be rendered)
   settleClearMs: 160,  // pipelined: longer wait when the drop cleared lines (clear animation)
   keyPenalty: 0,       // AI score penalty per keystroke (prefers cheaper placements)
+  strategy: 'SINGLE',  // line-clear strategy, orthogonal to the mode (src/modes.js STRATEGIES)
   aiBeam: 0,           // depth-2 child search only for top-N placements (0 = full search)
 };
 
@@ -53,6 +54,7 @@ class ZenBot {
     this.cal = null;
     this.piecesPlaced = 0;
     this.linesEstimate = 0;
+    this.quads = 0;
     this.stop = false;
     this.current = null;   // tracked identity of the falling piece
     this.resyncs = 0;
@@ -269,6 +271,21 @@ class ZenBot {
     };
   }
 
+  // Switch the line-clear strategy live. Unlike a mode it needs no turn boundary: every
+  // pickMove reads it, so the next decision already uses it.
+  setStrategy(name) {
+    const { STRATEGIES } = require('./modes.js');
+    const s = STRATEGIES[name && String(name).toUpperCase()];
+    if (!s) return null;
+    this.opts.strategy = s.key;
+    return s;
+  }
+
+  countClear(lines) {
+    this.linesEstimate += lines;
+    if (lines === 4) this.quads++;
+  }
+
   // Advance the tracked current piece after a placement, per TETR.IO hold semantics.
   advanceCurrent(queueBefore, useHold, holdBefore) {
     if (!useHold) { this.current = queueBefore[0] || null; return; }
@@ -315,14 +332,14 @@ class ZenBot {
     if (!queueBefore.length) return { skipped: true, reason: 'NEXT prefix incomplete' };
     const holdBefore = st.hold;
     const mv = pickMove({ board: sim, current: st.current, queue: queueBefore, hold: holdBefore,
-                          canHold: holdBefore ? true : queueBefore.length >= 2 });
+                          canHold: holdBefore ? true : queueBefore.length >= 2, strategy: this.opts.strategy });
     if (!mv) return { skipped: true, reason: 'pickMove returned null (topout?)' };
 
     const predicted = mv.expectedResult.board; // Board after placement (stack incl. clears)
     if (await this.runKeys(mv.keys) === false) return { skipped: true, reason: 'stopped' };
     await sleep(this.opts.postDropMs);
     this.piecesPlaced++;
-    this.linesEstimate += mv.expectedResult.linesCleared;
+    this.countClear(mv.expectedResult.linesCleared);
     this.advanceCurrent(queueBefore, mv.useHold, holdBefore);
 
     if (!verify) return { mv };
@@ -449,7 +466,8 @@ class ZenBot {
         if (!mvReady) {
           const sim = Board.fromMatrix(st.stackFilled);
           mv = pickMove({ board: sim, current: cur, queue: queueBefore, hold: holdBefore,
-                          canHold, keyPenalty: this.opts.keyPenalty || 0, beam: this.opts.aiBeam || 0 });
+                          canHold, keyPenalty: this.opts.keyPenalty || 0, beam: this.opts.aiBeam || 0,
+                          strategy: this.opts.strategy });
         }
         if (!mv) {
           if (!idleSince) idleSince = Date.now();
@@ -459,7 +477,7 @@ class ZenBot {
         idleSince = 0;
         if (await this.runKeys(mv.keys) === false) break;
         this.piecesPlaced++;
-        this.linesEstimate += mv.expectedResult.linesCleared;
+        this.countClear(mv.expectedResult.linesCleared);
         this.advanceCurrent(queueBefore, mv.useHold, holdBefore);
         this.lastPredicted = boardToVisibleMatrix(mv.expectedResult.board);
         if (onTurn) onTurn({ mv, piecesPlaced: this.piecesPlaced, linesEstimate: this.linesEstimate,
@@ -483,7 +501,8 @@ class ZenBot {
                   mv2 = pickMove({ board: Board.fromMatrix(st2.stackFilled), current: st2.current,
                                    queue: q2, hold: st2.hold,
                                    canHold: st2.hold ? true : q2.length >= 2,
-                                   keyPenalty: this.opts.keyPenalty || 0, beam: this.opts.aiBeam || 0 });
+                                   keyPenalty: this.opts.keyPenalty || 0, beam: this.opts.aiBeam || 0,
+                                   strategy: this.opts.strategy });
                   ready = true; // mv2===null with ready=true means a real topout verdict
                 }
               } catch (e) {}

@@ -241,7 +241,8 @@ async function runTurbo(bot, { maxPieces = Infinity, maxMs = Infinity, onTurn = 
       let future = plans.length ? plans[plans.length - 1].after : state;
       while (plans.length < Math.min(2, bot.opts.predictDepth) && future.queue.length >= 2) {
         const mv = pickMove({ ...future, beam: bot.opts.aiBeam,
-          estimateInput: m => planInput(m, c).estimatedInputMs, inputPenalty: bot.opts.inputPenalty });
+          estimateInput: m => planInput(m, c).estimatedInputMs, inputPenalty: bot.opts.inputPenalty,
+          strategy: bot.opts.strategy });
         if (!mv || mv.expectedResult.toppedOut) throw new Error('unsafe predicted stack');
         const after = applyMove(future, mv);
         plans.push({ sequence: future.sequence, mv, after, plan: planInput(mv, c) });
@@ -260,6 +261,7 @@ async function runTurbo(bot, { maxPieces = Infinity, maxMs = Infinity, onTurn = 
       catch (e) { if (!bot.stop) metrics.inputErrors++; throw e; }
       state = entry.after;
       bot.current = state.current; bot.piecesPlaced++; bot.linesEstimate += entry.mv.expectedResult.linesCleared;
+      if (entry.mv.expectedResult.linesCleared === 4) bot.quads = (bot.quads || 0) + 1;
       metrics.sequence = state.sequence; sinceVerify++; sinceFull++;
       // Spawn margin starts at hard-drop keydown, not after the hard-drop keyup/RTT.
       readyAt = executed.dropAt + c.spawnMs;
@@ -285,7 +287,8 @@ async function runTurbo(bot, { maxPieces = Infinity, maxMs = Infinity, onTurn = 
       // plan over a clear, and never invent unseen NEXT pieces.
       if (!clear && !plans.length && state.queue.length >= 2 && !bot.stop && !bot.pendingMode && bot.piecesPlaced < maxPieces) {
         const mv = pickMove({ ...state, beam: bot.opts.aiBeam,
-          estimateInput: m => planInput(m, c).estimatedInputMs, inputPenalty: bot.opts.inputPenalty });
+          estimateInput: m => planInput(m, c).estimatedInputMs, inputPenalty: bot.opts.inputPenalty,
+          strategy: bot.opts.strategy });
         if (mv && !mv.expectedResult.toppedOut) plans.push({ sequence: state.sequence,
           mv, after: applyMove(state, mv), plan: planInput(mv, c) });
       }

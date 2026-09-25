@@ -14,7 +14,7 @@
 //         + -7.899 * holes
 //         + -3.386 * cumulativeWells
 
-const { Board, computeKeySequence, HEIGHT, PIECES } = require('./board');
+const { Board, computeKeySequence, HEIGHT, WIDTH, PIECES } = require('./board');
 
 const W_LANDING = -4.500;
 const W_ERODED = 3.418;
@@ -54,11 +54,69 @@ function evaluate(placeResult, boardAfter) {
   );
 }
 
+// QUAD strategy: stack columns 0-8 flat and hole-free, keep the right column (the well) open,
+// and clear four rows at once with a vertical I. The stack terms are Dellacherie's, measured
+// with the well treated as a wall; line clears are scored as quad-or-burn instead of eroded
+// cells. Weights tuned offline (probe/quad_sim.js).
+const WELL = WIDTH - 1;
+const Q_WELL_CELL = -20;  // per filled well cell: it caps the well until those rows clear
+const Q_QUAD = 60;        // a four-row clear
+const Q_BURN = -10;       // per row cleared one to three at a time
+const Q_HOLD_I = 30;      // an I kept in hold: the quad is one swap away when the well is ready
+// At this stack height QUAD stops waiting for an I and plays single-clear until it is low again.
+const QUAD_DANGER_HEIGHT = 10;
+
+function evaluateQuad(placeResult, board) {
+  const { lockedCells, linesCleared } = placeResult;
+  let sumH = 0;
+  for (let i = 0; i < lockedCells.length; i++) sumH += (HEIGHT - 1) - lockedCells[i][1];
+  const landingHeight = sumH / lockedCells.length;
+
+  const rows = board.rows;
+  let rowTrans = 0, colTrans = 0, holes = 0, wells = 0, wellCells = 0;
+  for (let r = 0; r < HEIGHT; r++) {
+    const bits = rows[r] | (1 << WELL); // the well is a wall to the stack
+    let prev = 1;
+    for (let c = 0; c < WIDTH; c++) {
+      const cur = (bits >> c) & 1;
+      if (cur !== prev) rowTrans++;
+      prev = cur;
+    }
+    if ((rows[r] >> WELL) & 1) wellCells++;
+  }
+  for (let c = 0; c < WELL; c++) {
+    let prev = 0, roof = false;
+    for (let r = 0; r < HEIGHT; r++) {
+      const cur = (rows[r] >> c) & 1;
+      if (cur !== prev) colTrans++;
+      prev = cur;
+      if (cur) { roof = true; continue; }
+      if (roof) holes++;
+      const left = c === 0 ? 1 : (rows[r] >> (c - 1)) & 1;
+      const right = c === WELL - 1 ? 1 : (rows[r] >> (c + 1)) & 1;
+      if (left && right) {
+        for (let r2 = r; r2 < HEIGHT && !((rows[r2] >> c) & 1); r2++) wells++;
+      }
+    }
+    if (prev !== 1) colTrans++;
+  }
+
+  return (
+    W_LANDING * landingHeight +
+    W_ROW_TRANS * rowTrans +
+    W_COL_TRANS * colTrans +
+    W_HOLES * holes +
+    W_WELLS * wells +
+    Q_WELL_CELL * wellCells +
+    (linesCleared === 4 ? Q_QUAD : Q_BURN * linesCleared)
+  );
+}
+
 const DEAD_CHILD = -1e6; // next piece cannot be placed at all
 const LOCK_OUT = -1e9;   // placement locks fully above the visible field:
                          // game over in TETR.IO — worse than any live move
 
-function bestChildScore(board, pieceName) {
+function bestChildScore(board, pieceName, score = evaluate) {
   const placements = board.enumeratePlacements(pieceName);
   if (placements.length === 0) return null;
   let best = -Infinity;
@@ -67,7 +125,7 @@ function bestChildScore(board, pieceName) {
     const p = placements[i];
     if (p.result.lockOut) continue; // game-ending, not a real option
     sawLive = true;
-    const s = evaluate(p.result, p.result.board);
+    const s = score(p.result, p.result.board);
     if (s > best) best = s;
   }
   return sawLive ? best : null;
@@ -99,8 +157,11 @@ function locksInHiddenRows(placeResult) {
 // beam (0 = off): evaluate the expensive depth-2 child search only for the top-N
 // placements by parent-only score. Cuts pickMove ~35ms -> ~12ms; with beam=0 the
 // behavior (including tie-break order) is EXACTLY the original full search.
+// strategy: 'SINGLE' (Dellacherie, clears whenever it can) or 'QUAD' (evaluateQuad while the
+// stack is below QUAD_DANGER_HEIGHT). One scorer is used for the whole search.
 function pickMove({ board, current, queue = [], hold = null, canHold = true, keyPenalty = 0, beam = 0,
-                    estimateInput = null, inputPenalty = 0 }) {
+                    estimateInput = null, inputPenalty = 0, strategy = 'SINGLE' }) {
+  const scoreFn = strategy === 'QUAD' && maxHeight(board) < QUAD_DANGER_HEIGHT ? evaluateQuad : evaluate;
   const candidates = [
     { useHold: false, piece: current, next: queue[0] },
   ];
@@ -122,7 +183,8 @@ function pickMove({ board, current, queue = [], hold = null, canHold = true, key
     const placements = board.enumeratePlacements(cand.piece);
     for (let i = 0; i < placements.length; i++) {
       const p = placements[i];
-      let score = evaluate(p.result, p.result.board);
+      let score = scoreFn(p.result, p.result.board);
+      if (scoreFn === evaluateQuad && (cand.useHold ? current : hold) === 'I') score += Q_HOLD_I;
       const estimatedInputMs = estimateInput
         ? estimateInput({ piece: cand.piece, rot: p.rot, col: p.col, useHold: cand.useHold }) : null;
       if (estimatedInputMs != null) score -= Math.min(0.02, Math.max(0, inputPenalty)) * estimatedInputMs;
@@ -158,7 +220,7 @@ function pickMove({ board, current, queue = [], hold = null, canHold = true, key
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
     if (e.next) {
-      const child = bestChildScore(e.result.board, e.next);
+      const child = bestChildScore(e.result.board, e.next, scoreFn);
       e.score += child === null ? DEAD_CHILD : child;
     }
   }
@@ -199,4 +261,4 @@ function pickMove({ board, current, queue = [], hold = null, canHold = true, key
   };
 }
 
-module.exports = { evaluate, pickMove };
+module.exports = { evaluate, evaluateQuad, pickMove, QUAD_DANGER_HEIGHT };

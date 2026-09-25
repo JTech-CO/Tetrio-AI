@@ -61,6 +61,26 @@ MODES.TURBO = {
     turboFallback: 'RAPID', verifyTimeoutMs: 400, maxMismatchStreak: 2 },
 };
 
+// Line-clear strategy, orthogonal to the mode: any mode plays either one. Switched from the
+// console like a mode (run.js), and it takes effect on the very next decision.
+// SINGLE — Dellacherie: clears a line as soon as it can (mostly singles, some doubles).
+// QUAD   — stacks columns 1-9 flat, keeps the right column open, and clears four rows at once
+//          with a vertical I; below QUAD_DANGER_HEIGHT only (src/ai.js), above it plays SINGLE
+//          until the stack is low again. Offline (probe/quad_sim.js, 18k pieces): ~94% of lines
+//          as quads, 2.5x the guideline score per piece, 0 top-outs.
+const STRATEGIES = {
+  SINGLE: { key: 'SINGLE', label: 'SINGLE — 줄이 차는 대로 바로 클리어 (대부분 1줄)' },
+  QUAD: { key: 'QUAD', label: 'QUAD — 오른쪽 끝 열을 비워 두고 I 미노로 4줄 한 번에 클리어' },
+};
+
+function resolveStrategy(input) {
+  if (!input) return null;
+  const s = String(input).trim().toUpperCase();
+  if (s === 'SINGLE' || s === '싱글') return 'SINGLE';
+  if (s === 'QUAD' || s === '쿼드') return 'QUAD';
+  return null;
+}
+
 // '1' | 'basic' | 'BASIC' -> 'BASIC'; '2' | 'rapid' -> 'RAPID'; else null.
 function resolveMode(input) {
   if (!input) return null;
@@ -71,4 +91,4 @@ function resolveMode(input) {
   return MODES[s] ? s : null;
 }
 
-module.exports = { MODES, resolveMode };
+module.exports = { MODES, resolveMode, STRATEGIES, resolveStrategy };

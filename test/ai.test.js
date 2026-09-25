@@ -4,7 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 const { Board } = require('../src/board');
-const { evaluate, pickMove } = require('../src/ai');
+const { evaluate, pickMove, QUAD_DANGER_HEIGHT } = require('../src/ai');
+const { applyMove } = require('../src/state');
 
 function matrix20(fn) {
   const m = [];
@@ -205,4 +206,50 @@ test('performance: pickMove under 50ms on a rough mid-game board', () => {
   const elapsedMs = Number(process.hrtime.bigint() - t0) / 1e6;
   assert.ok(move);
   assert.ok(elapsedMs < 50, `pickMove took ${elapsedMs.toFixed(2)}ms`);
+});
+
+// Columns 0-8 filled for the bottom n rows, the right column (QUAD's well) open.
+function readyRows(n) {
+  return matrix20((mat) => {
+    for (let r = 20 - n; r < 20; r++) for (let c = 0; c < 9; c++) mat[r][c] = 1;
+  });
+}
+
+test('QUAD keeps an I for the well until four rows are ready, where SINGLE burns them', () => {
+  for (let n = 1; n <= 3; n++) {
+    const state = { board: Board.fromMatrix(readyRows(n)), current: 'I', queue: ['T', 'O', 'S'],
+      hold: null, canHold: true };
+    assert.strictEqual(pickMove(state).expectedResult.linesCleared, n, 'SINGLE clears what it can');
+    const move = pickMove({ ...state, strategy: 'QUAD' });
+    assert.strictEqual(move.expectedResult.linesCleared, 0);
+    assert.strictEqual(move.useHold, true, 'the I goes to hold');
+    assert.strictEqual(move.expectedResult.board.heights()[9], 0, 'the well stays open');
+  }
+  const quad = pickMove({ board: Board.fromMatrix(readyRows(4)), current: 'I', queue: ['T', 'O', 'S'],
+    hold: null, canHold: true, strategy: 'QUAD' });
+  assert.strictEqual(quad.expectedResult.linesCleared, 4);
+  assert.strictEqual(quad.col, 7, 'vertical I into the right column');
+});
+
+test('QUAD builds on columns 0-8 and clears only by quads over two bags', () => {
+  const seq = ['T', 'S', 'O', 'L', 'I', 'Z', 'J', 'O', 'J', 'T', 'L', 'S', 'Z', 'I', 'T', 'O', 'L', 'J', 'S'];
+  let state = { board: new Board(), current: seq[0], hold: null, queue: seq.slice(1, 6), sequence: 0 };
+  let fed = 6;
+  for (let i = 0; i < 14; i++) {
+    const move = pickMove({ ...state, canHold: true, strategy: 'QUAD' });
+    const lines = move.expectedResult.linesCleared;
+    assert.ok(lines === 0 || lines === 4, `piece ${i} cleared ${lines}`);
+    if (!lines) assert.strictEqual(move.expectedResult.board.heights()[9], 0, `piece ${i} filled the well`);
+    state = applyMove(state, move);
+    while (state.queue.length < 5) state.queue.push(seq[fed++]);
+  }
+});
+
+test('above the danger height QUAD plays exactly like SINGLE', () => {
+  const m = matrix20((mat) => {
+    for (let r = 20 - QUAD_DANGER_HEIGHT - 1; r < 20; r++) for (let c = 0; c < 4; c++) mat[r][c] = 1;
+  });
+  const state = { board: Board.fromMatrix(m), current: 'T', queue: ['I', 'S'], hold: 'Z', canHold: true };
+  const single = pickMove(state), quad = pickMove({ ...state, strategy: 'QUAD' });
+  assert.deepStrictEqual([quad.useHold, quad.piece, quad.rot, quad.col], [single.useHold, single.piece, single.rot, single.col]);
 });
