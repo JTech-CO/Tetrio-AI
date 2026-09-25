@@ -2,10 +2,6 @@ node_modules/
 probe/*.png
 probe/*.txt
 *.log
-probe/turbo-calibration*.json
-probe/video-original.json
-probe/turbo-validation*.json
-probe/turbo-overlap-attempt.json
-probe/turbo-trial.json
+probe/*.json
 probe/turbo-diagnostics/
 probe/*.jpg

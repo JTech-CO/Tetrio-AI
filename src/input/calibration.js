@@ -9,7 +9,10 @@ const viewportKey = vp => `${vp.w}x${vp.h}@${vp.dpr}`;
 // and a single shared file let every calibration overwrite — or, by invalidating it before
 // measuring, destroy on a failed run — the profile of the other size the app launches at.
 function calibrationPath(viewport, dir = DIR) {
-  return path.join(dir, `turbo-calibration-${viewportKey(viewport)}.json`);
+  const name = `turbo-calibration-${viewportKey(viewport)}.json`;
+  // The viewport comes from the page; it must never name a file outside `dir`.
+  if (!FILE_RE.test(name)) throw new Error('Invalid viewport for a calibration file: ' + viewportKey(viewport));
+  return path.join(dir, name);
 }
 
 function validateCalibration(c) {

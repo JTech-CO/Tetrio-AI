@@ -93,3 +93,18 @@ test('an unsafe stack, capture stall or interruption says nothing about the size
   await assert.rejects(calibrateInputs(stopped.bot, { dir, measureFn: stopped.measureFn, log: () => {} }), /interrupted/);
   assert.equal(calibrationStatus(WINDOWED, dir).state, 'missing');
 });
+
+test('a viewport the page reports can only name a calibration file inside the profile folder', async () => {
+  const { dir } = tempDir();
+  assert.equal(path.dirname(calibrationPath({ w: 1278, h: 1002, dpr: 1.25 }, dir)), dir);
+  // A page script can redefine innerWidth or devicePixelRatio to return any string.
+  for (const vp of [{ w: '/../../x', h: 1, dpr: 2 }, { w: 1, h: 1, dpr: '/../../../settings' },
+    { w: '1\\..\\x', h: 1, dpr: 2 }, { w: 1e21, h: 1, dpr: 2 }, { w: 1, h: 1, dpr: 'NaN' }]) {
+    assert.throws(() => calibrationPath(vp, dir), /Invalid viewport/, JSON.stringify(vp));
+    assert.equal(calibrationStatus(vp, dir).state, 'missing');
+    const bot = { t: { viewport: async () => vp } };
+    await assert.rejects(calibrateInputs(bot, { dir, measureFn: () => assert.fail('measured'), log: () => {} }),
+      /Invalid viewport/);
+  }
+  assert.deepEqual(fs.readdirSync(dir), [], 'nothing was written');
+});
