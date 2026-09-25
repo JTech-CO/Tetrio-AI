@@ -217,6 +217,13 @@ class Tetrio {
     this.pressedKeys.delete(name);
   }
 
+  // A connection that died mid-press leaves that key held inside the game, where it swallows
+  // every later press of it as a repeat (a held Space ignores each new hard drop). A fresh
+  // connection cannot know what the dead one held, so it releases every key it might use.
+  async releaseAllKeys() {
+    await Promise.allSettled(Object.keys(KEYS).map(name => this.keyUp(name)));
+  }
+
   // One tap: keydown, short hold, keyup
   async tap(name, { holdMs = 18, gapMs = 15 } = {}) {
     try {

@@ -255,6 +255,8 @@ async function main() {
         const e = new Error(`DEGRADED: 페이지 화면이 ${vp0.w}x${vp0.h}로 굳어 있음 — 앱 재시작 필요`);
         e.degraded = true; throw e;
       }
+      // The previous connection may have died with a key down (see releaseAllKeys).
+      await t.releaseAllKeys();
       await applyFocusSpoof(t);
       if (args.adblock) {
         await applyAdblock(t);

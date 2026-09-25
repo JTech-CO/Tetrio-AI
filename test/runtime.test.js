@@ -127,7 +127,7 @@ test('supervisor stops with failure after eight no-progress gameplay errors, inc
       require('./src/runtime/launch-app').ensureTetrio = async () => ({ reused: true, version: { Browser: 'fake' } });
       require('./src/runtime/cdp').Tetrio.connect = async () => ({ keepCompositorAwake: async () => {},
         stopKeepAwake: async () => {}, screenshot: async () => ({}), close: async () => {},
-        viewport: async () => ({ w: 1295, h: 997, dpr: 2 }) });
+        viewport: async () => ({ w: 1295, h: 997, dpr: 2 }), releaseAllKeys: async () => {} });
       require('./src/runtime/focus').applyFocusSpoof = async () => {};
       require('./src/vision/vision').Vision.detectFrame = () => ({});
       const Bot = require('./src/bot').ZenBot;
@@ -239,4 +239,13 @@ test('mismatch diagnostics are written only when enabled, and capped', () => {
   assert.equal(fs.readdirSync(dir).filter(f => f.endsWith('.json')).length, 60);
   assert.equal(fs.readdirSync(dir).filter(f => f.endsWith('.jpg')).length, 60);
   new ZenBot({}).dumpMismatch(empty(), st); // disabled: nothing to write, nothing thrown
+});
+
+test('a fresh connection releases every key a dead one might have left held in the game', async () => {
+  const { t, events } = transport();
+  await t.releaseAllKeys();
+  const { KEYS } = require('../src/runtime/cdp');
+  assert.equal(events.length, Object.keys(KEYS).length);
+  assert.ok(events.every(e => e.startsWith('keyUp:')));
+  assert.ok(events.includes('keyUp:Space'), 'a held Space swallows every later hard drop');
 });
