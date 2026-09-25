@@ -1,10 +1,10 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { Tetrio } = require('../src/runtime/cdp');
 const { ZenBot } = require('../src/bot');
-const { MODES, resolveStrategy } = require('../src/modes');
+const { MODES, resolveCommand, commandCode } = require('../src/modes');
 const { parseArgs } = require('../src/run');
 const empty = () => Array.from({ length: 20 }, () => Array(10).fill(null));
 
@@ -119,14 +119,64 @@ test('CLI rejects invalid, missing and unknown arguments before connecting to th
   assert.equal(args.postdrop, 0);
   assert.equal(args.mode, 'RAPID');
 });
-test('line-clear strategy: CLI flag, console aliases, and it survives a mode switch', () => {
+test('console command is [speed]-[strategy], always both', () => {
+  assert.deepEqual(resolveCommand('1-s'), { mode: 'BASIC', strategy: 'SINGLE' });
+  assert.deepEqual(resolveCommand('2-q'), { mode: 'RAPID', strategy: 'QUAD' });
+  assert.deepEqual(resolveCommand(' 3 - Q '), { mode: 'TURBO', strategy: 'QUAD' });
+  assert.deepEqual(resolveCommand('rapid-single'), { mode: 'RAPID', strategy: 'SINGLE' });
+  for (const bad of ['2', 'q', 'quad', '4-s', '2-x', '2-q-1', '-q', '2-', '']) {
+    assert.equal(resolveCommand(bad), null, bad);
+  }
+  assert.equal(commandCode('RAPID', 'QUAD'), '2-q');
+  assert.equal(commandCode('BASIC', 'SINGLE'), '1-s');
+});
+test('startup menu takes [speed]-[strategy], and the same command switches during play', async () => {
+  const script = `
+    require('./src/runtime/launch-app').ensureTetrio = async () => ({ reused: true, version: { Browser: 'fake' } });
+    require('./src/runtime/cdp').Tetrio.connect = async () => ({ keepCompositorAwake: async () => {},
+      stopKeepAwake: async () => {}, screenshot: async () => ({}), close: async () => {},
+      viewport: async () => ({ w: 1295, h: 997, dpr: 2 }), releaseAllKeys: async () => {} });
+    require('./src/runtime/focus').applyFocusSpoof = async () => {};
+    require('./src/vision/vision').Vision.detectFrame = () => ({});
+    const Bot = require('./src/bot').ZenBot;
+    Bot.prototype.calibrate = async () => {};
+    Bot.prototype.run = async function () {
+      console.log('RUNNING ' + this.mode + ' ' + this.opts.strategy);
+      const until = Date.now() + 5000;
+      while (Date.now() < until && !(this.mode === 'TURBO' && this.opts.strategy === 'SINGLE')) {
+        await new Promise(r => setTimeout(r, 20));
+      }
+      console.log('SWITCHED ' + this.mode + ' ' + this.opts.strategy);
+      this.piecesPlaced = 1;
+    };
+    process.argv = ['node', 'run.js', '--pieces', '1', '--no-adblock'];
+    require('module').runMain(require('path').resolve('src/run.js'));
+  `;
+  const child = spawn(process.execPath, ['-e', script], { cwd: require('path').join(__dirname, '..') });
+  let out = '', answered = false, switched = false;
+  child.stdout.on('data', (d) => {
+    out += d;
+    if (!answered && out.includes('[속도]-[방식] + Enter')) {
+      answered = true;
+      child.stdin.write('2\n2-q\n'); // the old lone-speed form first, then the new one
+    }
+    if (!switched && out.includes('RUNNING RAPID QUAD')) { switched = true; child.stdin.write('3-s\n'); }
+  });
+  child.stderr.on('data', (d) => { out += d; });
+  const code = await new Promise((resolve) => {
+    const kill = setTimeout(() => child.kill(), 12000);
+    child.on('exit', (c) => { clearTimeout(kill); resolve(c); });
+  });
+  assert.equal(code, 0, out);
+  assert.ok(out.includes('? 명령: [속도]-[방식]'), 'a lone speed is not a command any more');
+  assert.ok(out.includes('플레이 시작 [2-q]'), out);
+  assert.match(out, /SWITCHED TURBO SINGLE/);
+});
+test('line-clear strategy: CLI flag, and it survives a mode switch', () => {
   assert.equal(parseArgs(['node', 'run.js']).strategy, 'SINGLE');
   assert.equal(parseArgs(['node', 'run.js', '--strategy', 'quad']).strategy, 'QUAD');
+  assert.equal(parseArgs(['node', 'run.js', '--strategy', 'q']).strategy, 'QUAD');
   assert.throws(() => parseArgs(['node', 'run.js', '--strategy', 'triple']));
-  assert.equal(resolveStrategy(' Quad '), 'QUAD');
-  assert.equal(resolveStrategy('쿼드'), 'QUAD');
-  assert.equal(resolveStrategy('싱글'), 'SINGLE');
-  assert.equal(resolveStrategy('3'), null, 'mode numbers stay modes');
   const bot = new ZenBot({}, { ...MODES.RAPID.opts, mode: 'RAPID', strategy: 'QUAD' });
   bot.setMode('BASIC');
   assert.equal(bot.opts.strategy, 'QUAD');

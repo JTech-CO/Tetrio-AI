@@ -3,7 +3,7 @@
 // reaches a piece count. Used to check live mode/strategy switching end to end.
 //
 //   node probe/console_drive.js <log> <at>:<cmd> ... -- <run.js options>
-//   node probe/console_drive.js quad.log 150:quad 500:1 650:3 -- --mode rapid --pieces 1300 --restart-every 0
+//   node probe/console_drive.js quad.log 150:2-q 500:1-q 650:3-q -- --mode rapid --pieces 1300 --restart-every 0
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');

@@ -9,10 +9,10 @@
 // By default it REUSES an already-running TETR.IO (preserving your ZEN session). Enter
 // ZEN mode yourself first; the bot detects the board and starts playing.
 //
-// MODES are selected/switched from THIS console window (no in-game overlay):
-// a menu is shown once the ZEN field is detected, and during play you can type
-// `1`/`basic`, `2`/`rapid` or `3`/`turbo` + Enter at any time to switch live. The line-clear
-// strategy is a separate axis, switched the same way with `single` / `quad` (src/modes.js).
+// Speed (mode) and line-clear strategy are selected/switched from THIS console window (no
+// in-game overlay) with one command, [speed]-[strategy]: speed 1 basic, 2 rapid, 3 turbo;
+// strategy s single, q quad. `1-s` = BASIC + SINGLE, `2-q` = RAPID + QUAD. A menu is shown
+// once the ZEN field is detected, and the same command switches live at any time.
 
 const readline = require('readline');
 const { ensureTetrio } = require('./runtime/launch-app.js');
@@ -21,7 +21,7 @@ const { applyFocusSpoof } = require('./runtime/focus.js');
 const { applyAdblock, applyCosmetics, sweepAds } = require('./runtime/adblock.js');
 const { Vision } = require('./vision/vision.js');
 const { ZenBot } = require('./bot.js');
-const { MODES, resolveMode, STRATEGIES, resolveStrategy } = require('./modes.js');
+const { MODES, resolveMode, STRATEGIES, resolveStrategy, resolveCommand, commandCode } = require('./modes.js');
 const { enterZen } = require('./runtime/navigate.js');
 const { acquireTurboEnvironment } = require('./runtime/turbo-environment.js');
 
@@ -101,17 +101,20 @@ async function reachZen(t, { allowManualWait = false } = {}) {
   }
 }
 
+const COMMAND_HELP = '[속도]-[방식] — 속도 1 basic · 2 rapid · 3 turbo, 방식 s single · q quad (예: 1-s, 2-q)';
+
 function printModeMenu(current, strategy) {
-  console.log('\n── 모드 선택 ─────────────────────────────────────────────');
+  console.log('\n── 속도·방식 선택 ────────────────────────────────────────');
+  console.log('  속도');
   Object.values(MODES).forEach((m, i) => {
-    const mark = m.key === current ? '▶' : ' ';
-    console.log(` ${mark} [${i + 1}] ${m.label}`);
+    console.log(` ${m.key === current ? '▶' : ' '} [${i + 1}] ${m.label}`);
   });
-  console.log('  라인 클리어 방식 (모드와 별개, 어느 모드에서나):');
+  console.log('  라인 클리어 방식');
   Object.values(STRATEGIES).forEach((s) => {
-    console.log(` ${s.key === strategy ? '▶' : ' '} [${s.key.toLowerCase()}] ${s.label}`);
+    console.log(` ${s.key === strategy ? '▶' : ' '} [${s.key[0].toLowerCase()}] ${s.label}`);
   });
-  console.log('   플레이 중에도 이 창에 번호/이름 + Enter 로 언제든 전환됩니다.');
+  console.log(`   ${COMMAND_HELP}`);
+  console.log('   플레이 중에도 이 창에 같은 명령 + Enter 로 언제든 전환됩니다. 통계: status');
   console.log('──────────────────────────────────────────────────────────');
 }
 
@@ -217,31 +220,34 @@ async function main() {
   rl.on('line', (line) => {
     const cmd = String(line).trim();
     if (!cmd) return;
-    const m = resolveMode(cmd);
-    if (m) {
-      if (selectResolve) { const r = selectResolve; selectResolve = null; r(m); }
-      else if (m !== modeName) applyMode(m);
-      else console.log(`  (이미 ${m} 모드입니다)`);
-    } else if (resolveStrategy(cmd)) {
-      // Does not answer the startup menu, which keeps waiting for a mode.
-      const s = resolveStrategy(cmd);
-      if (s !== strategyName) applyStrategy(s);
-      else console.log(`  (이미 ${s} 방식입니다)`);
+    const c = resolveCommand(cmd);
+    if (c) {
+      if (selectResolve) { const r = selectResolve; selectResolve = null; r(c); }
+      else if (c.mode === modeName && c.strategy === strategyName) {
+        console.log(`  (이미 ${commandCode(modeName, strategyName)} — ${modeName}·${strategyName} 입니다)`);
+      } else {
+        // Strategy first: it applies to the next decision, while a mode waits for a turn boundary.
+        if (c.strategy !== strategyName) applyStrategy(c.strategy);
+        if (c.mode !== modeName) applyMode(c.mode);
+      }
     } else if (cmd.toLowerCase() === 'status') {
       console.log('  ' + summary());
     } else {
-      console.log('  ? 명령: 1|basic, 2|rapid, 3|turbo, single|quad, status');
+      console.log(`  ? 명령: ${COMMAND_HELP} / status`);
     }
   });
   rl.on('SIGINT', () => shutdown(0));
 
-  // Startup menu: wait for a choice; default to `def` after timeoutMs of silence.
-  const askMode = (def, timeoutMs = 8000) => new Promise((resolve) => {
-    console.log(`모드 번호/이름 + Enter — 입력 없이 ${Math.round(timeoutMs / 1000)}초 지나면 ${def} 로 시작:`);
+  // Startup menu: wait for a [speed]-[strategy] choice; keep the current pair after timeoutMs
+  // of silence.
+  const askChoice = (timeoutMs = 8000) => new Promise((resolve) => {
+    const def = { mode: modeName, strategy: strategyName };
+    const code = `${commandCode(def.mode, def.strategy)} (${def.mode}·${def.strategy})`;
+    console.log(`[속도]-[방식] + Enter — 입력 없이 ${Math.round(timeoutMs / 1000)}초 지나면 ${code}로 시작:`);
     const tm = setTimeout(() => {
-      if (selectResolve) { selectResolve = null; console.log(`  (입력 없음 — ${def} 모드로 시작합니다)`); resolve(def); }
+      if (selectResolve) { selectResolve = null; console.log(`  (입력 없음 — ${code}로 시작합니다)`); resolve(def); }
     }, timeoutMs);
-    selectResolve = (m) => { clearTimeout(tm); resolve(m); };
+    selectResolve = (c) => { clearTimeout(tm); resolve(c); };
   });
 
   // Supervisor loop: play until done; on any error (renderer crash, disconnect, degradation)
@@ -310,9 +316,9 @@ async function main() {
       if (!modeAsked) {
         modeAsked = true;
         printModeMenu(modeName, strategyName);
-        modeName = await askMode(modeName);
+        ({ mode: modeName, strategy: strategyName } = await askChoice());
       }
-      console.log(`  ▶ 플레이 시작 — 모드: ${MODES[modeName].label} · 방식: ${strategyName}`);
+      console.log(`  ▶ 플레이 시작 [${commandCode(modeName, strategyName)}] — 속도: ${MODES[modeName].label} · 방식: ${strategyName}`);
 
       // The per-window-size profile (and measuring a size that has none) is TURBO's own job at
       // its start, so a live switch to TURBO gets it too. Only an explicit file is checked here.

@@ -61,8 +61,8 @@ MODES.TURBO = {
     turboFallback: 'RAPID', verifyTimeoutMs: 400, maxMismatchStreak: 2 },
 };
 
-// Line-clear strategy, orthogonal to the mode: any mode plays either one. Switched from the
-// console like a mode (run.js), and it takes effect on the very next decision.
+// Line-clear strategy, orthogonal to the mode: any mode plays either one. It takes effect on
+// the very next decision.
 // SINGLE — Dellacherie: clears a line as soon as it can (mostly singles, some doubles).
 // QUAD   — stacks columns 1-9 flat, keeps the right column open, and clears four rows at once
 //          with a vertical I; below QUAD_DANGER_HEIGHT only (src/ai.js), above it plays SINGLE
@@ -73,11 +73,12 @@ const STRATEGIES = {
   QUAD: { key: 'QUAD', label: 'QUAD — 오른쪽 끝 열을 비워 두고 I 미노로 4줄 한 번에 클리어' },
 };
 
+// 's' | 'single' -> 'SINGLE'; 'q' | 'quad' -> 'QUAD'; else null.
 function resolveStrategy(input) {
   if (!input) return null;
   const s = String(input).trim().toUpperCase();
-  if (s === 'SINGLE' || s === '싱글') return 'SINGLE';
-  if (s === 'QUAD' || s === '쿼드') return 'QUAD';
+  if (s === 'S' || s === 'SINGLE') return 'SINGLE';
+  if (s === 'Q' || s === 'QUAD') return 'QUAD';
   return null;
 }
 
@@ -91,4 +92,18 @@ function resolveMode(input) {
   return MODES[s] ? s : null;
 }
 
-module.exports = { MODES, resolveMode, STRATEGIES, resolveStrategy };
+// Console command: [speed]-[strategy], both always given. '1-s' -> BASIC + SINGLE,
+// '2-q' -> RAPID + QUAD, 'turbo-quad' also works; anything else -> null.
+function resolveCommand(input) {
+  const parts = String(input || '').split('-');
+  if (parts.length !== 2) return null;
+  const mode = resolveMode(parts[0]), strategy = resolveStrategy(parts[1]);
+  return mode && strategy ? { mode, strategy } : null;
+}
+
+// The short command that selects this pair, e.g. ('RAPID', 'QUAD') -> '2-q'.
+function commandCode(mode, strategy) {
+  return `${Object.keys(MODES).indexOf(mode) + 1}-${strategy[0].toLowerCase()}`;
+}
+
+module.exports = { MODES, resolveMode, STRATEGIES, resolveStrategy, resolveCommand, commandCode };
