@@ -27,7 +27,7 @@ ZEN 화면을 찾으면 시작 메뉴가 뜹니다. 콘솔에 `[속도]-[방식]
 
 | 속도 | 동작 | 실측 피스/초 |
 |---|---|---:|
-| BASIC | 매 피스 화면을 읽은 뒤 계산하고 입력 | 2.3 |
+| BASIC | 매 피스 화면을 읽은 뒤 계산하고 입력 | 2.3~2.4 |
 | RAPID | 화면 읽기와 계산을 새 피스 대기와 겹쳐 수행 | 4.1~4.3 |
 | TURBO | 창 크기별로 보정한 입력으로 최대 2피스 앞서 두고, 화면 검증은 뒤에서 따로 | 5.8~7.0 |
 
@@ -37,11 +37,11 @@ ZEN 화면을 찾으면 시작 메뉴가 뜹니다. 콘솔에 `[속도]-[방식]
 %%{init: {"xyChart": {"height": 360}, "themeVariables": {"xyChart": {"plotColorPalette": "#3987e5, #d95926"}}}}%%
 xychart-beta
     title "속도·방식별 플레이 속도 (피스/초)"
-    x-axis ["BASIC·QUAD", "RAPID·SINGLE", "RAPID·QUAD", "TURBO·SINGLE", "TURBO·QUAD"]
+    x-axis ["BASIC·SINGLE", "BASIC·QUAD", "RAPID·SINGLE", "RAPID·QUAD", "TURBO·SINGLE", "TURBO·QUAD"]
     y-axis "피스/초" 0 --> 8
     %% 음수 = 막대 없음. mermaid는 0도 8px 막대로 그리므로 값이 없는 칸은 -5로 둔다.
-    bar [-5, 4.13, -5, 5.84, -5]
-    bar [2.33, -5, 4.29, -5, 6.99]
+    bar [2.42, -5, 4.13, -5, 5.84, -5]
+    bar [-5, 2.33, -5, 4.29, -5, 6.99]
 ```
 
 ## 라인 클리어 방식
