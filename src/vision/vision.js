@@ -1,6 +1,5 @@
-// Pixel vision for TETR.IO ZEN: read the 10x20 board + NEXT queue + HOLD from a screenshot.
-// Coordinates are in SCREENSHOT (device) pixels. The default calibration is for a 3206x1606
-// screenshot (1603x803 viewport @ DPR 2). calibrateFromFrame() re-detects if the size changes.
+// Reads the 10x20 board, NEXT queue and HOLD from a screenshot, in device pixels. The default
+// geometry below is replaced by Vision.detectFrame() for the real window.
 const { PNG } = require('pngjs');
 const { identifyPiece } = require('./pieces.js');
 
@@ -87,10 +86,8 @@ class Vision {
       }
     }
     if (!px.length) return { h: 0, s: 0, v: 0 };
-    // Average the MIDDLE brightness band (40..75%): a real mino's body is uniformly bright
-    // so the band stays bright; an empty/ghost cell over the semi-transparent starfield is
-    // mostly dark with a few bright star/ghost-edge pixels — a brightest-N average (used
-    // before) amplified exactly those and made ghost-piece cells flip-flop as "filled".
+    // Average the middle brightness band (40..75%): a mino is evenly bright, while an empty
+    // cell over the starfield is dark with a few bright specks.
     px.sort((a, b) => (b[0] + b[1] + b[2]) - (a[0] + a[1] + a[2]));
     const lo = Math.floor(px.length * 0.25), hi = Math.max(lo + 1, Math.ceil(px.length * 0.6));
     let r = 0, g = 0, b = 0, n = 0;
@@ -227,10 +224,8 @@ class Vision {
     return this._readPieceInRegion(png, this.hold.x0, this.hold.x1, this.hold.y0, this.hold.y1);
   }
 
-  // Binary fingerprint of the big stage-number glyphs below the field (not the numeric
-  // value — this font is brittle to OCR). Sampled on a fixed grid and thresholded to bits.
-  // Compare two fingerprints with stageChanged() (Hamming distance) to detect a stage-up.
-  // Region: centered under the field, between the score line and further down.
+  // Fingerprint of the big stage number under the field (thresholded pixels, not OCR).
+  // Compare two with stageChanged().
   stageFingerprint(pngBuf) {
     const png = Buffer.isBuffer(pngBuf) ? PNG.sync.read(pngBuf) : pngBuf;
     const { width: W, height: H, data } = png;
@@ -263,9 +258,7 @@ class Vision {
     return diff / a.bits.length > frac;
   }
 
-  // Re-detect the field frame from a fresh screenshot. Size-independent: it finds the two
-  // tallest vertical white lines (the field's left/right borders) rather than assuming the
-  // field fills a fixed fraction of the image — so it works at any window size.
+  // Finds the field in a screenshot of any size: its borders are the tallest vertical white lines.
   static detectFrame(pngBuf) {
     const png = Buffer.isBuffer(pngBuf) ? PNG.sync.read(pngBuf) : pngBuf;
     const { width: W, height: H, data } = png;
@@ -294,9 +287,7 @@ class Vision {
       }
     }
     if (clusters.length < 2) throw new Error('frame detect failed: found ' + clusters.length + ' border cluster(s)');
-    // The field's two borders form SQUARE cells: (right-left)/10 ≈ borderHeight/20. Among the
-    // candidates (which also include NEXT/HOLD box borders), pick the pair whose spacing best
-    // matches square 10x20 cells. This robustly rejects the narrower side boxes.
+    // NEXT/HOLD boxes have borders too; pick the pair that makes square 10x20 cells.
     let best = null;
     for (let i = 0; i < clusters.length; i++) for (let j = i + 1; j < clusters.length; j++) {
       const L = clusters[i], R = clusters[j];

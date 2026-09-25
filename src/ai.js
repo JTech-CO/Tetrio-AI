@@ -1,18 +1,10 @@
 'use strict';
 
-// Move selection for the TETR.IO ZEN bot. Pure logic, no I/O.
+// Move selection. Pure logic, no I/O.
 //
-// Evaluation is the Dellacherie (2003) hand-tuned linear heuristic, the
-// classic one-piece controller that clears ~660,000 lines on average
-// (weights as published in Pierre Dellacherie's original agent; see
-// Thiery & Scherrer, "Building Controllers for Tetris" (2009), Table 1,
-// and Colin Fahey's tetris page — https://colinfahey.com/tetris/):
-//   score = -4.500 * landingHeight
-//         +  3.418 * erodedPieceCells
-//         + -3.217 * rowTransitions
-//         + -9.348 * colTransitions
-//         + -7.899 * holes
-//         + -3.386 * cumulativeWells
+// SINGLE scores a placement with Dellacherie's hand-tuned heuristic (Thiery & Scherrer,
+// "Building Controllers for Tetris", 2009): landing height, eroded cells, row and column
+// transitions, holes and wells, weighted as below.
 
 const { Board, computeKeySequence, HEIGHT, WIDTH, PIECES } = require('./board');
 
@@ -27,8 +19,7 @@ const W_WELLS = -3.386;
 function evaluate(placeResult, boardAfter) {
   const { lockedCells, linesCleared, clearedRows } = placeResult;
 
-  // Landing height: height of the locked piece's center of mass above the
-  // floor (floor row => 0), measured before line clears.
+  // Average height of the placed cells above the floor, before any clear.
   let sumH = 0;
   for (let i = 0; i < lockedCells.length; i++) {
     sumH += (HEIGHT - 1) - lockedCells[i][1];
@@ -54,10 +45,9 @@ function evaluate(placeResult, boardAfter) {
   );
 }
 
-// QUAD strategy: stack columns 0-8 flat and hole-free, keep the right column (the well) open,
-// and clear four rows at once with a vertical I. The stack terms are Dellacherie's, measured
-// with the well treated as a wall; line clears are scored as quad-or-burn instead of eroded
-// cells. Weights tuned offline (probe/quad_sim.js).
+// QUAD: keep the right column (the well) empty, stack the rest flat and hole-free, and clear
+// four rows at once with a vertical I. Stack terms as above, with the well treated as a wall.
+// Weights tuned with probe/quad_sim.js.
 const WELL = WIDTH - 1;
 const Q_WELL_CELL = -20;  // per filled well cell: it caps the well until those rows clear
 const Q_QUAD = 60;        // a four-row clear
@@ -113,8 +103,7 @@ function evaluateQuad(placeResult, board) {
 }
 
 const DEAD_CHILD = -1e6; // next piece cannot be placed at all
-const LOCK_OUT = -1e9;   // placement locks fully above the visible field:
-                         // game over in TETR.IO — worse than any live move
+const LOCK_OUT = -1e9;   // the piece locks entirely above the field: game over
 
 function bestChildScore(board, pieceName, score = evaluate) {
   const placements = board.enumeratePlacements(pieceName);
@@ -142,23 +131,12 @@ function locksInHiddenRows(placeResult) {
   return placeResult.toppedOut === true;
 }
 
-// pickMove({ board, current, queue, hold, canHold })
-//  -> { useHold, rot, col, keys, expectedResult } or null if no piece can
-//     be placed at all (hard top-out).
-//
-// TETR.IO hold semantics: pressing hold with an empty hold slot stores the
-// current piece and makes queue[0] the new current (so the depth-2
-// lookahead piece becomes queue[1]); with a filled slot it swaps, leaving
-// the queue untouched (lookahead piece stays queue[0]).
-// keyPenalty (>= 0): score penalty per keystroke the placement needs (rotation +
-// horizontal taps + hold). 0 disables it. RAPID mode uses a small value so the AI
-// prefers cheaper key sequences among near-equal placements (shorter sequences =
-// faster pieces), without overriding real stack-quality differences.
-// beam (0 = off): evaluate the expensive depth-2 child search only for the top-N
-// placements by parent-only score. Cuts pickMove ~35ms -> ~12ms; with beam=0 the
-// behavior (including tie-break order) is EXACTLY the original full search.
-// strategy: 'SINGLE' (Dellacherie, clears whenever it can) or 'QUAD' (evaluateQuad while the
-// stack is below QUAD_DANGER_HEIGHT). One scorer is used for the whole search.
+// pickMove({ board, current, queue, hold, canHold, ... })
+//  -> { useHold, piece, rot, col, keys, expectedResult }, or null when nothing fits.
+// Looks one piece ahead: queue[0], or queue[1] when holding into an empty slot uses queue[0].
+// keyPenalty: score cost per key press, so near-equal placements prefer fewer keys.
+// beam: look ahead only from the best N placements (0 = from all of them).
+// strategy: 'SINGLE' or 'QUAD'; QUAD scores like SINGLE at QUAD_DANGER_HEIGHT and above.
 function pickMove({ board, current, queue = [], hold = null, canHold = true, keyPenalty = 0, beam = 0,
                     estimateInput = null, inputPenalty = 0, strategy = 'SINGLE' }) {
   const scoreFn = strategy === 'QUAD' && maxHeight(board) < QUAD_DANGER_HEIGHT ? evaluateQuad : evaluate;
@@ -188,8 +166,7 @@ function pickMove({ board, current, queue = [], hold = null, canHold = true, key
       const estimatedInputMs = estimateInput
         ? estimateInput({ piece: cand.piece, rot: p.rot, col: p.col, useHold: cand.useHold }) : null;
       if (estimatedInputMs != null) score -= Math.min(0.02, Math.max(0, inputPenalty)) * estimatedInputMs;
-      // A lock-out ends the game: only ever pick it when literally every
-      // available placement ends the game.
+      // A lock-out ends the game: only pick it when every placement does.
       if (p.result.lockOut) score += LOCK_OUT;
       if (keyPenalty > 0) {
         const nKeys = (p.rot % 4 !== 0 ? 1 : 0) +
@@ -212,8 +189,7 @@ function pickMove({ board, current, queue = [], hold = null, canHold = true, key
 
   if (entries.length === 0) return null;
 
-  // Beam pruning: keep only the top-N by parent score before the depth-2 child search.
-  // (stable slice — with beam=0 the original entry order and full search are preserved)
+  // Look ahead only from the best `beam` placements.
   if (beam > 0 && entries.length > beam) {
     entries = entries.slice().sort((a, b) => b.score - a.score).slice(0, beam);
   }
@@ -230,9 +206,7 @@ function pickMove({ board, current, queue = [], hold = null, canHold = true, key
     if (entries[i].score > best.score) best = entries[i];
   }
 
-  // Safety rule: if the best move locks any cell in the hidden spawn rows
-  // (imminent top-out), fall back to the move minimizing the resulting max
-  // stack height (ties broken by score).
+  // If the best move reaches into the hidden spawn rows, take the lowest resulting stack instead.
   if (locksInHiddenRows(best.result)) {
     let safest = best;
     let safestH = maxHeight(best.result.board);

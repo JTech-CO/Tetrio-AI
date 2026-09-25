@@ -1,18 +1,12 @@
 'use strict';
-// Production entry point: ensure the app is up + debuggable, apply focus spoof + ad
-// blocking, wait until a ZEN game is on screen, then play continuously.
+// Entry point: starts or attaches to the app, waits for a ZEN game, and plays, restarting the
+// app when it has to.
 //
-// Usage:
 //   node src/run.js [--mode basic|rapid|turbo] [--strategy single|quad] [--pieces N]
 //                   [--port 9222] [--restart] [--no-adblock] [--quality 85] [--postdrop N]
 //
-// By default it REUSES an already-running TETR.IO (preserving your ZEN session). Enter
-// ZEN mode yourself first; the bot detects the board and starts playing.
-//
-// Speed (mode) and line-clear strategy are selected/switched from THIS console window (no
-// in-game overlay) with one command, [speed]-[strategy]: speed 1 basic, 2 rapid, 3 turbo;
-// strategy s single, q quad. `1-s` = BASIC + SINGLE, `2-q` = RAPID + QUAD. A menu is shown
-// once the ZEN field is detected, and the same command switches live at any time.
+// Speed and strategy are picked in this console with one command, [speed]-[strategy]
+// (1 basic, 2 rapid, 3 turbo; s single, q quad), in the startup menu or during play.
 
 const readline = require('readline');
 const { ensureTetrio } = require('./runtime/launch-app.js');
@@ -26,10 +20,8 @@ const { enterZen } = require('./runtime/navigate.js');
 const { acquireTurboEnvironment } = require('./runtime/turbo-environment.js');
 
 function parseArgs(argv) {
-  // Proactive "pit-stop": over very long sessions the app's renderer degrades (content
-  // shrinks inside the window, then it stalls). We pre-empt that by cleanly restarting +
-  // re-entering ZEN every `restartEvery` pieces OR `restartMins` minutes, whichever first.
-  // ZEN is account-saved and auto-resumes on relaunch, so a restart loses nothing.
+  // Scheduled restart ("pit-stop") every restartEvery pieces or restartMins minutes, before the
+  // renderer degrades. ZEN resumes after a relaunch, so nothing is lost.
   const a = { port: 9222, pieces: Infinity, restart: false, adblock: true, quality: 85,
               postdrop: null, mode: 'BASIC', strategy: 'SINGLE', restartEvery: 2500, restartMins: 20 };
   for (let i = 2; i < argv.length; i++) {
@@ -60,27 +52,17 @@ function parseArgs(argv) {
   return a;
 }
 
-// Is a ZEN field visible right now? Capture is timeout-guarded, and BOTH a capture timeout
-// (cold/wedged compositor) and a missing field count as "not visible" so the caller just
-// keeps polling — the screencast warming should make frames flow within a few tries.
+// Is a ZEN field on screen? A capture timeout counts as "no", so the caller keeps polling.
 async function zenVisible(t) {
   try { Vision.detectFrame(await t.screenshot(null, { timeoutMs: 6000 })); return true; }
   catch { return false; }
 }
 
-// Try to get a ZEN game on screen. Returns true on success, false if it couldn't.
-//
-// Two-tier recovery: (1) a clean relaunch AUTO-RESUMES the in-progress ZEN board when the
-// graceful close saved the session — poll for the field first. (2) Otherwise the app is on
-// HOME, so enterZen() drives the menus (SOLO -> ZEN -> START) by stable element ids. If even
-// that fails (a rare dialog/announcement race), return false so the supervisor restarts and
-// rolls again. Only `allowManualWait` (the very first launch, human present) waits
-// indefinitely for the user to open ZEN instead of returning false.
+// Gets a ZEN game on screen: waits for a relaunch to resume ZEN, else drives the menus. Returns
+// false on failure so the supervisor restarts; only the first launch (allowManualWait) waits
+// for the user to open ZEN instead.
 async function reachZen(t, { allowManualWait = false } = {}) {
-  // Keep the compositor producing frames during recovery: on a static/backgrounded screen
-  // captureScreenshot yields no frames and (without this) would hang — the guard turns that
-  // into a fast timeout, and the screencast makes real frames flow for detection. Once a ZEN
-  // game is up the falling pieces keep it warm, so we stop it before returning.
+  // A screencast keeps frames coming on a static screen, so detection can see it.
   await t.keepCompositorAwake();
   try {
     const deadline = Date.now() + 16000;
@@ -127,8 +109,7 @@ async function main() {
   let stop = false, exitCode = 0;
   let totalPieces = 0, totalLines = 0, totalQuads = 0, totalStageUps = 0, totalResyncs = 0, totalMispredicts = 0;
   let currentBot = null;
-  let activeT = null;         // the live CDP connection, visible to shutdown() BEFORE a bot
-                              // exists (waitForZen / mode menu window) — zombie-app hazard
+  let activeT = null;         // the live connection, so shutdown() can close it before a bot exists
   let modeName = args.mode;   // chosen mode (updated from the console)
   let strategyName = args.strategy; // line-clear strategy, carried across segments like the mode
   let modeAsked = false;      // startup menu is shown only once, on first ZEN detection
@@ -172,10 +153,8 @@ async function main() {
     console.log(`⇒ 라인 클리어 방식: ${STRATEGIES[name].label}`);
   };
 
-  // The game's bounce/shake/action-text effects rescale and shake the field on every hard
-  // drop and line clear — the window visibly pulses at play speed, and the field moves
-  // between calibration and the reads that depend on it. They are pinned for EVERY mode and
-  // the user's own settings are handed back on the way out.
+  // Bounce, shake and action text move the field on every drop and clear, so they are turned
+  // off in every mode and the user's settings are restored on the way out.
   const restoreVisuals = async (b) => {
     for (const env of [b && b.turboVisual, b && b.visualEnv]) {
       if (!env) continue;
@@ -188,10 +167,8 @@ async function main() {
     if (b) { b.turboVisual = null; b.visualEnv = null; }
   };
 
-  // Clean shutdown: ALWAYS close the CDP connection before exiting. Force-killing the app
-  // (or the bot dying) while a CDP socket is still open can leave a stuck "zombie" process
-  // that holds the single-instance lock and blocks the app from reopening. Closing the
-  // socket first prevents that.
+  // Always close the CDP connection before exiting: an app killed with a socket still open can
+  // leave a zombie process that stops it from reopening.
   let shuttingDown = false;
   const shutdown = async (code = 0) => {
     if (shuttingDown) return; shuttingDown = true; stop = true;
@@ -213,9 +190,8 @@ async function main() {
   process.on('uncaughtException', (e) => { console.error('예기치 못한 오류:', e && e.message); shutdown(1); });
   process.on('unhandledRejection', (e) => { console.error('처리되지 않은 거부:', e && (e.message || e)); shutdown(1); });
 
-  // Console UI: one line handler serves both the startup menu and live switching.
-  // terminal:false = cooked mode: the console host handles echo/editing, and Ctrl+C
-  // stays a real SIGINT (caught by the process handler above).
+  // One line handler serves the startup menu and live switching. terminal:false keeps Ctrl+C
+  // a real SIGINT.
   const rl = readline.createInterface({ input: process.stdin, terminal: false });
   rl.on('line', (line) => {
     const cmd = String(line).trim();
@@ -250,11 +226,8 @@ async function main() {
     selectResolve = (c) => { clearTimeout(tm); resolve(c); };
   });
 
-  // Supervisor loop: play until done; on any error (renderer crash, disconnect, degradation)
-  // recover and resume. Two restart triggers keep an unattended session alive indefinitely:
-  //  - reactive: after repeated errors, or immediately on a DEGRADED signal;
-  //  - proactive "pit-stop": every restartEvery pieces / restartMins minutes, restart the app
-  //    BEFORE the renderer degrades. The app auto-resumes ZEN, so reachZen() gets us back in.
+  // Supervisor: play until done and recover from errors. The app is restarted after repeated
+  // errors, at once on degradation, and on the pit-stop schedule.
   let consecutiveFailures = 0;
   let pitStopDue = false;   // last segment ended at its cap -> refresh the renderer next
   let degradedDue = false;  // last error was a renderer-shrink signal -> restart now
@@ -274,9 +247,8 @@ async function main() {
 
       t = await Tetrio.connect({ port: args.port });
       activeT = t;
-      // A process killed mid-capture can leave the page view stuck at the capture's clip size
-      // (see captureChain in cdp.js): the game is drawn in a tiny corner, ZEN can't be detected,
-      // and the first-launch ZEN wait would never end. Only an app restart restores the view.
+      // A process killed mid-capture can leave the page view stuck small (see cdp.js
+      // captureChain); only a restart fixes it.
       const vp0 = await t.viewport();
       if (vp0.w < 400 || vp0.h < 300) {
         const e = new Error(`DEGRADED: 페이지 화면이 ${vp0.w}x${vp0.h}로 굳어 있음 — 앱 재시작 필요`);
@@ -291,9 +263,7 @@ async function main() {
         console.log('  광고 차단: 적용됨 (네트워크 + DOM 제거)');
       }
 
-      // Only the very first entry waits for the user if auto-nav fails; later (recovery)
-      // entries return false so we restart + retry hands-off (relaunch auto-resumes ZEN
-      // ~2/3 of the time). Give up only after many consecutive failures (needs a human).
+      // Only the first entry waits for the user if menu navigation fails; later ones restart.
       const reached = await reachZen(t, { allowManualWait: totalPieces === 0 && !everPlayed });
       if (!reached) {
         try { await t.close(); } catch {}
@@ -320,8 +290,7 @@ async function main() {
       }
       console.log(`  ▶ 플레이 시작 [${commandCode(modeName, strategyName)}] — 속도: ${MODES[modeName].label} · 방식: ${strategyName}`);
 
-      // The per-window-size profile (and measuring a size that has none) is TURBO's own job at
-      // its start, so a live switch to TURBO gets it too. Only an explicit file is checked here.
+      // TURBO calibrates itself per window size; only an explicit --calibration file is checked here.
       if (modeName === 'TURBO' && args.calibrationPath) {
         try { require('./input/calibration').loadCalibration(args.calibrationPath); }
         catch (e) { console.warn('  ⚠ ' + e.message + ' — RAPID 로 진행합니다.'); modeName = 'RAPID'; }
@@ -336,8 +305,7 @@ async function main() {
       }
       const bot = new ZenBot(t, botOpts);
       currentBot = bot;
-      // Pin the visual effects BEFORE calibrating, so the field is measured where it will
-      // actually be drawn. Non-fatal: a game that won't apply them still plays fine.
+      // Turn the effects off before calibrating, so the field is measured where it is drawn.
       try { bot.visualEnv = await acquireTurboEnvironment(t); await sleep(50); }
       catch (e) { console.warn('  ⚠ 화면 효과 고정 실패 — 그대로 진행합니다:', e.message); }
       await bot.calibrate();
@@ -371,8 +339,7 @@ async function main() {
         },
       });
 
-      // Segment ended: accumulate. If we've hit the piece target (or user stopped) we're done;
-      // otherwise this was a pit-stop cap -> restart to refresh the renderer, then continue.
+      // Segment ended: add it up, then stop or do the pit-stop restart.
       totalPieces += bot.piecesPlaced; totalLines += bot.linesEstimate; totalQuads += bot.quads;
       totalStageUps += bot.stageUps; totalResyncs += bot.resyncs; totalMispredicts += bot.mispredicts;
       if (bot.resumeTurbo) modeName = 'TURBO'; // a pit-stop mid-handoff must not strand RAPID
@@ -398,8 +365,7 @@ async function main() {
         console.log(`  ⚠ 렌더러 열화 감지 — 앱 재시작으로 복구: ${e.message}`);
       }
       consecutiveFailures++;
-      // Give up after many consecutive UNRECOVERABLE errors (e.g. a stuck single-instance
-      // lock that no restart can clear) instead of spamming "복구 시도" every 2s forever.
+      // Give up after 8 errors in a row that restarts don't fix.
       if (consecutiveFailures >= 8) {
         console.log(`  ✖ 복구 불가(연속 ${consecutiveFailures}회): ${e.message}`);
         console.log('     작업 관리자에서 TETR.IO.exe를 모두 종료하고, 그래도 안 되면 PC를 재부팅한 뒤 다시 실행해 주세요.');

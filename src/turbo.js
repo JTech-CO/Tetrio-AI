@@ -83,11 +83,9 @@ async function verifyObservation(bot, capture, state, full) {
   return { ...observation, latencyMs: performance.now() - start, transientFrames };
 }
 
-// The app opens at different window sizes (fresh launch, restored window, bot restart), and
-// each needs its own measured profile. A size with none is measured here, once, instead of
-// silently falling back. A size whose most conservative rung already mispredicted is NOT
-// retried automatically — a lucky later pass would save a marginal profile — but the probe
-// can still re-measure it on purpose. Returns true when it calibrated.
+// Each window size needs its own measured input profile; a size without one is measured here,
+// once. A size whose safest setting already failed is not retried automatically (the probe
+// can still re-measure it). Returns true when it calibrated.
 async function ensureCalibration(bot) {
   if (bot.opts.calibration || bot.opts.calibrationPath) return false;
   const vp = await bot.t.viewport();
@@ -138,9 +136,8 @@ async function waitForStableState(bot, capture, sequence) {
   throw Object.assign(new Error('ZEN level transition did not settle'), { resumable: true });
 }
 
-// Separate from the legacy read-every-turn loop. There is at most one observation in
-// flight, and the next input plan is fenced until it completes. Thus a CDP screenshot
-// cannot silently drift across a later hard drop. Captures overlap spawn wait and AI.
+// TURBO loop: plans pieces ahead and checks the screen in the background. At most one check is
+// in flight, and no input goes out past a check that hasn't finished.
 async function runTurbo(bot, { maxPieces = Infinity, maxMs = Infinity, onTurn = null } = {}) {
   let c;
   const viewportMatches = vp => ['w', 'h', 'dpr'].every(k => vp[k] === c.environment.viewport[k]);

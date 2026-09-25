@@ -1,25 +1,19 @@
 'use strict';
 
-// Pure Tetris board logic for a TETR.IO ZEN-mode bot.
-// SRS (Super Rotation System) true-rotation piece data, guideline spawn
-// positions, drop/lock/line-clear simulation and Dellacherie feature helpers.
-// No I/O, no timers, fully deterministic. CommonJS.
+// Board model: SRS piece shapes and spawn positions, hard drop, line clears, and the features
+// the AI scores. Pure and deterministic.
 
 const WIDTH = 10;
 const HEIGHT = 24; // internal rows; top HIDDEN rows are the spawn area
 const HIDDEN = 4;  // rows 0..3 hidden, rows 4..23 = visible 20 rows
 const FULL_ROW = (1 << WIDTH) - 1; // 0b1111111111
-// Guideline spawn: pieces appear in the two rows just above the visible
-// field (rows 21-22 counted from the bottom) = internal rows 2-3, i.e. the
-// spawn bbox's top row is internal row HIDDEN - 2 for every piece.
+// Pieces spawn in the two rows just above the visible field.
 const SPAWN_ROW = HIDDEN - 2;
 
 const PIECE_NAMES = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
 
-// Spawn-orientation (rotation state 0) cell offsets [x, y] within the
-// bounding box, y = 0 is the TOP row of the bbox. Guideline / SRS spawn
-// states as used by TETR.IO. `spawnCol` is the board column of the bbox's
-// left edge at spawn (pieces spawn centered, rounded left).
+// Spawn shapes as [x, y] offsets in the bounding box (y = 0 is its top row). spawnCol is the
+// board column of the box's left edge at spawn.
 const SPAWN_DATA = {
   I: { size: 4, cells: [[0, 1], [1, 1], [2, 1], [3, 1]], spawnCol: 3 },
   O: { size: 3, cells: [[1, 0], [2, 0], [1, 1], [2, 1]], spawnCol: 3 },
@@ -41,10 +35,8 @@ function sortCells(cells) {
     .sort((a, b) => (a[1] - b[1]) || (a[0] - b[0]));
 }
 
-// Build the full SRS rotation tables. Rotation state r = r successive
-// clockwise rotations from spawn. O is rotation-invariant (all 4 states
-// share identical cells). I rotates within its 4x4 bbox — SRS true rotation,
-// matching https://tetris.wiki/Super_Rotation_System basic rotation states.
+// The four SRS rotation states of each piece (state r = r clockwise turns from spawn).
+// https://tetris.wiki/Super_Rotation_System
 const PIECES = {};
 for (const name of PIECE_NAMES) {
   const { size, cells, spawnCol } = SPAWN_DATA[name];
@@ -65,8 +57,7 @@ for (const name of PIECE_NAMES) {
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;
     }
-    // For each occupied column of the bbox, the lowest occupied dy —
-    // lets dropRow compute landing without per-cell collision scans.
+    // Lowest cell of each occupied column in the box.
     const bottomByX = new Map();
     for (const [x, y] of rc) {
       const cur = bottomByX.get(x);
@@ -194,12 +185,8 @@ class Board {
       next.rows = kept;
     }
 
-    // Top-out flags (pre-clear rows, per guideline):
-    //  - lockOut: the piece locked entirely above the visible field — in
-    //    TETR.IO this ends the game, so the search layer must treat it as
-    //    a terminal move, never an ordinary placement.
-    //  - toppedOut: at least one cell locked in the hidden spawn rows
-    //    (the stack now intrudes into the spawn area — imminent danger).
+    // lockOut: the piece locked entirely above the field (game over in TETR.IO).
+    // toppedOut: part of it locked in the hidden spawn rows (close to game over).
     let hiddenCells = 0;
     for (let i = 0; i < lockedCells.length; i++) {
       if (lockedCells[i][1] < HIDDEN) hiddenCells++;
@@ -289,10 +276,7 @@ class Board {
     return t;
   }
 
-  // Dellacherie cumulative well depth: for every empty cell whose left and
-  // right neighbors (walls count as filled) are filled, add the number of
-  // consecutive empty cells from it downward (inclusive). A depth-d well
-  // therefore contributes 1 + 2 + ... + d.
+  // Dellacherie's cumulative wells: a well d cells deep adds 1 + 2 + ... + d.
   wells() {
     let sum = 0;
     for (let c = 0; c < WIDTH; c++) {
@@ -311,15 +295,8 @@ class Board {
     return sum;
   }
 
-  // True iff the bot's key model (spawn -> rotate in place, no kicks ->
-  // shift laterally at spawn height -> hard drop) can actually realize the
-  // placement, mirroring computeKeySequence exactly:
-  //  1. the piece must not collide at its spawn position (else the real
-  //     game tops out on spawn and NO placement is possible), and
-  //  2. rotating in place at spawn to `rot` must be collision-free (we
-  //     assume open air / no kicks — reject otherwise), and
-  //  3. every bbox column stepped through between spawnCol and targetCol
-  //     must be collision-free at spawn height in `rot`.
+  // Whether the bot's keys can reach this placement: rotate at the spawn position (no wall
+  // kicks), slide sideways at spawn height, hard drop. Mirrors computeKeySequence.
   isReachable(pieceName, rot, targetCol) {
     const spawnCol = PIECES[pieceName].spawnCol;
     if (this.collides(pieceName, 0, spawnCol, SPAWN_ROW)) return false;
@@ -336,11 +313,7 @@ class Board {
     return true;
   }
 
-  // Every distinct reachable (rot, col) placement for a piece. Rotation
-  // states with identical (translation-normalized) cell sets are visited
-  // once: O has 1, I/S/Z have 2, T/J/L have 4. Placements the key model
-  // cannot reach (spawn blocked, rotation blocked, or lateral path blocked
-  // at spawn height) are excluded — see isReachable().
+  // Every distinct placement the keys can reach (see isReachable).
   enumeratePlacements(pieceName) {
     const out = [];
     const piece = PIECES[pieceName];
@@ -373,9 +346,7 @@ class Board {
   }
 }
 
-// Key tokens to realize a placement: rotate at spawn height (open air, so
-// SRS rotation keeps the bbox in place and no kicks apply), shift laterally,
-// then hard drop. Tap count is simply targetCol - spawn bbox column.
+// Keys for a placement: rotate at spawn, tap sideways, hard drop.
 function computeKeySequence(pieceName, rot, targetCol) {
   const keys = [];
   const r = ((rot % 4) + 4) % 4;

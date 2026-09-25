@@ -1,12 +1,8 @@
 'use strict';
-// Ensure TETR.IO desktop is running with the CDP remote-debugging port open.
-// If it is already reachable on the port, reuse it; otherwise (re)launch the app.
-//
-// IMPORTANT: TETR.IO is a single-instance app. To attach over CDP it MUST be launched with
-// --remote-debugging-port, which can only be set at launch. So if the app is already running
-// WITHOUT the port (e.g. the user opened it normally), we have to restart it. A force-kill
-// must fully terminate every child process before relaunching — otherwise a lingering process
-// keeps the single-instance lock and BOTH our relaunch and the user's manual relaunch fail.
+// Makes sure TETR.IO runs with the CDP debug port open: reuses it if it does, else (re)launches
+// it. The port can only be set at launch and the app allows a single instance, so an app opened
+// normally must be closed first, every child process included (a leftover one keeps the
+// single-instance lock and blocks every relaunch).
 const http = require('http');
 const { spawn, execSync } = require('child_process');
 const path = require('path');
@@ -15,9 +11,7 @@ const CDP = require('chrome-remote-interface');
 const DEFAULT_EXE = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'tetrio-desktop', 'TETR.IO.exe');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Reject if a promise doesn't settle in time. CDP Browser.close() / connect can HANG when the
-// app is on a wedged/blocked screen and doesn't close cleanly — without this the whole restart
-// stalls for minutes. On timeout we fall through to the force-kill, which always works.
+// Browser.close() or attaching can hang on a wedged app; after the timeout the force-kill runs.
 function withTimeout(promise, ms, label = 'op') {
   let timer;
   const t = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(label + ' timeout')), ms); });
@@ -82,10 +76,8 @@ function countTetrio() {
   } catch { return 0; }
 }
 
-// Gracefully quit a debug-enabled app via CDP Browser.close(). This closes all sockets and
-// releases the single-instance lock cleanly — unlike a force-kill, which can leave a stuck
-// "zombie" (dead process still holding an open CDP socket + the lock) that blocks reopening.
-// Returns true if the app went away.
+// Quits the app through CDP, which releases the single-instance lock cleanly (a force-kill can
+// leave a zombie process holding it). True if the app exited.
 async function gracefulCloseViaPort(port, maxMs = 8000) {
   if (!(await probePort(port))) return false;
   let client = null;
@@ -102,11 +94,8 @@ async function gracefulCloseViaPort(port, maxMs = 8000) {
   return countTetrio() === 0;
 }
 
-// Force-kill every TETR.IO process and wait for the LIVE processes to exit, releasing the
-// single-instance lock before relaunch. A killed process can leave a short-lived "zombie"
-// table entry (already exited, handle not yet released) that never reaches 0 — so we stop
-// once the count stops decreasing (stable), not only at 0. ensureTetrio's port/page check is
-// the real confirmation that the relaunch took, and it retries if a genuine instance lingers.
+// Force-kills every TETR.IO process. A killed process can stay in the process list for a while,
+// so waiting ends once the count stops falling; ensureTetrio confirms the relaunch.
 async function killTetrio({ maxMs = 10000 } = {}) {
   const doKill = () => {
     try {
@@ -129,10 +118,8 @@ async function killTetrio({ maxMs = 10000 } = {}) {
   await sleep(1500); // settle so the OS releases the single-instance lock/mutex
 }
 
-// Chromium flags that keep the renderer AND the compositor running at full speed while the
-// window is backgrounded/occluded. Without CalculateNativeWinOcclusion disabled, Chrome
-// throttles the compositor when the window is hidden, making Page.captureScreenshot take
-// several seconds per frame — even though the game's rAF loop keeps running.
+// Keep rendering at full speed with the window in the background. Without
+// CalculateNativeWinOcclusion disabled, a hidden window makes each screenshot take seconds.
 const PERF_FLAGS = [
   '--disable-background-timer-throttling',
   '--disable-renderer-backgrounding',
@@ -145,10 +132,8 @@ function launch(exe, port) {
   child.unref();
 }
 
-// Returns { reused, version, note? } once the app is debuggable on `port`.
-// - If already debuggable: reuse (no restart).
-// - Otherwise: fully terminate any running instance, relaunch WITH the debug port, and wait.
-//   Retries the whole cycle so a stuck single-instance lock can't wedge us permanently.
+// Returns { reused, version, note? } once the app is debuggable on `port`. The close-and-
+// relaunch cycle is retried a few times.
 async function ensureTetrio({ port = 9222, exe = DEFAULT_EXE, forceRestart = false } = {}) {
   if (!forceRestart) {
     const existing = await probePort(port);
@@ -162,10 +147,8 @@ async function ensureTetrio({ port = 9222, exe = DEFAULT_EXE, forceRestart = fal
     await killTetrio();          // fully terminate; releases the single-instance lock
     const preCount = countTetrio(); // usually 0; may be >0 if a stuck zombie lingers
     launch(exe, port);
-    // Wait for the debug port. A real launch brings up a multi-process app (main + GPU +
-    // renderers) that STAYS; a single-instance-locked launch spawns one main that quits
-    // immediately, so the count never sustains above preCount. Detect that and fail fast —
-    // no wait will help until the stuck instance is cleared.
+    // A real launch stays up as several processes; one blocked by the single-instance lock
+    // quits at once, so fail fast instead of waiting.
     let version = null, realApp = false;
     const start = Date.now();
     while (Date.now() - start < 30000) {

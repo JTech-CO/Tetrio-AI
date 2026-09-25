@@ -1,6 +1,6 @@
 'use strict';
-// TETR.IO ZEN bot: read the screen each turn, decide with the Dellacherie AI,
-// execute keystrokes over CDP. Full-vision-per-turn so there is no simulator drift.
+// The BASIC/RAPID play loop: read the screen, pick a move, send the keys over CDP.
+// TURBO's loop is in src/turbo.js.
 
 const { Tetrio, sleep, preciseSleep } = require('./runtime/cdp.js');
 const { applyFocusSpoof } = require('./runtime/focus.js');
@@ -12,15 +12,12 @@ const { pickMove } = require('./ai.js');
 const { knownQueue } = require('./state.js');
 
 const DEFAULTS = {
-  // BASIC-mode values (see src/modes.js for the presets). Tuned on live ZEN (sweep):
-  // 2.61 pps at 0% misplacement. Do NOT lower tapHoldMs below ~14 (a 60fps frame is
-  // 16.7ms; a shorter keydown can fall between frame samples and be dropped —
-  // measured 43% misplacement at tapHold=12). postDropMs below ~120 shrinks the spawn margin.
+  // BASIC values (presets in src/modes.js). Shorter tapHoldMs or postDropMs make the game
+  // miss keys.
   tapHoldMs: 14,     // keydown duration for a single tap
   tapGapMs: 10,      // gap between taps
   afterRotateMs: 14, // extra settle after a rotate
-  postDropMs: 120,   // after hard drop: lets the piece lock AND the next piece become
-                     // controllable before the next read (too short -> dropped keys/misplacements)
+  postDropMs: 120,   // wait after a hard drop until the next piece can be moved
   idleSleepMs: 60,   // sleep between polls while waiting to (re)bootstrap the current piece
   jpegQuality: 85,   // clip capture quality
   recalibrateEvery: 80, // re-detect the field frame every N pieces
@@ -35,13 +32,11 @@ const DEFAULTS = {
   aiBeam: 0,           // depth-2 child search only for top-N placements (0 = full search)
 };
 
-// TURBO hands RAPID a high stack or an unsettled stage transition. Take it back only once
-// RAPID has placed a few pieces cleanly (the stretch is really over) and the stack is well
-// below TURBO's limit of 12, so the two never flap at the boundary.
+// TURBO hands high stacks and stage transitions to RAPID, and takes over again after a few
+// clean pieces with a stack of 6 rows or less, so the two don't flap at the boundary.
 const TURBO_RESUME_HEIGHT = 6;
 const TURBO_RESUME_AFTER = 3;
-// Each slow-capture fallback doubles the bridge (3, 6, 12, ...): occasional jitter comes back
-// quickly, a window that is slow for good mostly stays in RAPID instead of flapping.
+// Each fallback for a slow capture doubles that wait (3, 6, 12, ... pieces).
 const resumeBridge = slowCaptures => Math.min(200, TURBO_RESUME_AFTER * 2 ** Math.max(0, slowCaptures - 1));
 const stackHeight = rows => { const top = rows.findIndex(r => r.some(Boolean)); return top < 0 ? 0 : rows.length - top; };
 
@@ -108,30 +103,22 @@ class ZenBot {
   // Calibrate from a full PNG frame-detect, then set up a tight JPEG clip around the
   // play area (HOLD..NEXT, top..stage) so the per-turn capture+decode stays fast.
   async calibrate() {
-    // Retry a few times — a transient bad frame (ad still fading, mid-refresh) can defeat
-    // detection; do not invent coordinates if no frame has ever been calibrated.
+    // Retry: an ad or an animation can hide the field in a single frame.
     let abs = null, lastErr = null;
     for (let attempt = 0; attempt < 5 && !abs; attempt++) {
       try { abs = Vision.detectFrame(await this.t.screenshot()); }
       catch (e) { lastErr = e; await sleep(600); }
     }
     if (!abs) {
-      // A stage-up / line-clear animation can hide the field borders for several seconds.
-      // KEEP the previous working calibration in that case — falling back to the static
-      // default (a different window size) would brick every subsequent read.
+      // A stage-up animation can hide the borders for seconds; keep the last good calibration.
       if (this.absCal) {
         console.warn('[calibrate] frame detect failed, keeping previous calibration:', lastErr && lastErr.message);
         return this.cal;
       }
       throw new Error('Field calibration failed: ' + (lastErr && lastErr.message));
     }
-    // Renderer-degradation guard. Over very long sessions the app's render resolution can
-    // collapse (the game content shrinks inside an unchanged window — TETR.IO/Chromium
-    // downscaling under accumulated GPU/memory pressure), which quietly wrecks vision.
-    // Metric = field HEIGHT as a fraction of window height. TETR.IO sizes the (square) cells to
-    // the window HEIGHT and pillarboxes the sides, so this fraction is invariant to BOTH width
-    // and height resizes (unlike a width fraction, which drops on an aspect-ratio change and
-    // would false-fire a restart); only a real content downscale lowers it.
+    // Over long sessions the game can start rendering smaller inside the window. The field's
+    // height as a share of the window height survives window resizes, so a drop means that shrink.
     const cellW0 = (abs.fieldRight - abs.fieldLeft) / abs.cols;
     const fieldFrac = (abs.rows * cellW0) / abs.screenshotH;
     if (this.fieldFracBaseline == null) this.fieldFracBaseline = fieldFrac;
@@ -153,9 +140,7 @@ class ZenBot {
     const xMaxD = Math.min(abs.screenshotW, Math.ceil(abs.fieldRight + 7.2 * cw));
     const yMinD = Math.max(0, Math.floor(fieldTop - 2.5 * cw));
     const yMaxD = Math.min(abs.screenshotH, Math.ceil(abs.fieldBottom + 2.8 * cw));
-    // Downscale the per-turn capture so the decoded image size (and decode time) is
-    // independent of the window size: target ~TARGET_CELL device px per cell. Chrome's clip
-    // `scale` multiplies on top of DPR, so scale=1 gives device resolution; we go below 1.
+    // Scale the capture to ~TARGET_CELL px per cell, so decode time doesn't depend on window size.
     const TARGET_CELL = this.opts.captureCell || 22; // smaller = faster decode, riskier queue ID
     const captureScale = Math.min(1, Math.max(0.28, TARGET_CELL / cw));
     this.captureScale = captureScale;
@@ -173,10 +158,8 @@ class ZenBot {
     return this.cal;
   }
 
-  // A clipped capture interrupted outside this process (see captureChain in cdp.js) can leave
-  // the page view stuck at the clip's size: the field becomes unreadable and only an app
-  // restart restores it. Report it as degradation so the supervisor restarts now, not after
-  // the 60s idle deadline.
+  // An interrupted capture can leave the page view stuck at clip size (see cdp.js captureChain).
+  // Report it as degradation so the supervisor restarts the app right away.
   async assertViewport() {
     if (!this.calViewport) return;
     let vp;
@@ -212,9 +195,8 @@ class ZenBot {
     return this.t.captureRegion(this.clip, this.opts.jpegQuality);
   }
 
-  // Read the full game state from a screenshot.
-  // `current` is resolved from tracking (this.current) with the board's clean 4-cell
-  // read as an override/resync when they disagree.
+  // Reads the game state. The current piece comes from tracking; a clean 4-cell view of the
+  // piece on the board overrides it.
   //  -> { filled, grid, current, currentCells, partial, stackFilled, queue, hold, hasPiece }
   async readState(buf) {
     if (!buf) buf = await this.grab();
@@ -229,9 +211,8 @@ class ZenBot {
     const queue = this.vision.readQueue(buf);
     const hold = this.vision.readHold(buf);
 
-    // Stage-change detection (the big number below the field changes when a stage clears).
-    // Debounced: only count a change once the new fingerprint has settled for a couple of
-    // reads, so transient animation/score jitter does not inflate the count.
+    // Count a stage-up when the stage number under the field changes and stays changed for
+    // two reads.
     try {
       const fp = this.vision.stageFingerprint(buf);
       if (this.lastStageSig) {
@@ -248,9 +229,8 @@ class ZenBot {
       }
     } catch (e) {}
 
-    // Only a CLEAN 4-cell in-field read may override tracking. The spawn strip cuts the piece
-    // at the field boundary, and at RAPID's ~17px capture cells a clipped piece quantizes to a
-    // different tetromino (measured: J read as I), so it may only BOOTSTRAP a missing identity.
+    // Only a clean 4-cell view may override tracking. The strip above the field shows a cut-off
+    // piece that can be misread (J as I), so it is used only when tracking has nothing.
     const boardLetter = piece?.letter
       || (this.current ? null : this.vision.readSpawnPiece?.(buf)) || null;
     let current = this.current;
@@ -297,9 +277,7 @@ class ZenBot {
   async runKeys(keys) {
     const o = this.opts;
     if (o.preciseKeys) {
-      // RAPID: precise (unquantized) timing — Windows setTimeout rounds every short sleep
-      // up to ~15.6ms, which alone costs ~15ms per tap. With real timing the floors are:
-      // hold >=~17 (span a 60fps frame), gap >=~5 (gap 1 -> ~30% dropped taps, measured).
+      // Precise timing (RAPID). Holds under ~17ms (one frame) or gaps under ~5ms drop taps.
       for (let i = 0; i < keys.length; i++) {
         if (this.stop) return false;
         const k = keys[i];
@@ -352,14 +330,10 @@ class ZenBot {
     return { mv, predicted: predMatrix, actual: actualMatrix, match, after, current: st.current };
   }
 
-  // Tracking-driven loop. TETR.IO's ZEN gravity is "relaxed" (slow), so a newly spawned piece
-  // takes ~1s to fall from the hidden spawn area into the visible field — but it is controllable
-  // from spawn. So we do NOT wait to SEE the piece: its identity comes from queue-tracking, the
-  // per-turn board read gives the clean stack (the new piece is still hidden/entering and is
-  // stripped out), and we place immediately. readState cross-checks tracking against any clean
-  // visible piece (passive resync), so a rare mis-timed placement self-corrects on the next read.
-  // maxMs: stop the segment after this wall-clock budget so the supervisor can do a
-  // proactive "pit-stop" restart that refreshes the renderer before it degrades.
+  // ZEN's gravity is slow and a new piece can be moved as soon as it spawns, so the loop doesn't
+  // wait to see it: its identity comes from the NEXT queue and the read shows the stack. A clean
+  // view of the piece corrects tracking if it drifts. maxMs ends the segment so the supervisor
+  // can restart the app before its renderer degrades.
   async run({ maxPieces = Infinity, maxMs = Infinity, onTurn = null } = {}) {
     const start = Date.now();
     this.running = true;
@@ -391,26 +365,20 @@ class ZenBot {
           if (pending) { try { await pending; } catch (e) {} pending = null; } // used the old cal — discard
           await this.calibrate(); lastRecal = this.piecesPlaced;
         }
-        // Periodically remove accumulating ad iframes (they crash the renderer over time).
-        // Fire-and-forget: DOM cleanup latency (~30-100ms) must not stall the play loop.
+        // Remove ad iframes now and then (they pile up and crash the renderer); don't wait.
         if (Date.now() - lastSweep >= this.opts.sweepEveryMs) {
           lastSweep = Date.now();
           try { sweepAds(this.t).catch(() => {}); } catch (e) {}
         }
-        // Clean stack + queue + hold; current = tracked|visible. In RAPID the read AND the
-        // move computation already ran during the previous piece's postDrop wait
-        // (null on failure -> fresh read here).
+        // In RAPID this read and move were already made during the previous piece's wait.
         let st = null, mv = null, mvReady = false;
         if (pending) {
           const p = await pending; pending = null;
           if (p && p.st) { st = p.st; mv = p.mv; mvReady = p.mvReady; }
         }
         if (!st) st = await this.readState();
-        // Prediction check: does the screen match what the previous placement predicted?
-        // A mismatch may be a half-rendered frame — the pipelined read fires only settleMs after
-        // the drop — so reobserve ONCE and discard any move computed from that frame. The re-read
-        // is itself ~60ms of settling, so it needs no sleep of its own; further retries only added
-        // latency to the critical path. Persistent drift still uses the real board (self-correcting).
+        // Does the screen match the last prediction? A mismatch may be a half-drawn frame, so
+        // read once more and drop any move based on it. A lasting mismatch is played as seen.
         if (this.lastPredicted) {
           const predicted = this.lastPredicted;
           for (let retry = 0; !st.transition && !this.stop; retry++) {
@@ -436,19 +404,15 @@ class ZenBot {
           idle++;
           if (idle === 1) await this.assertViewport();
           if (!idleSince) idleSince = Date.now();
-          // Independent liveness deadline: if we can't read a piece for this long straight, the
-          // screen is stuck in a way per-turn reads won't fix (a warm-but-unreadable overlay,
-          // shrunken content that still passes detectFrame, etc.) — throw so the supervisor
-          // restarts. This does NOT rely on the caller's maxMs (which may be disabled).
+          // No readable piece for a minute: the screen is stuck in a way reads won't fix, so
+          // throw and let the supervisor restart.
           if (Date.now() - idleSince > IDLE_MAX_MS) {
             throw new Error(`IDLE: ${Math.round((Date.now() - idleSince) / 1000)}초간 피스를 읽지 못함 — 앱 재시작 필요`);
           }
           if (idle > 60) {
             if (onTurn) onTurn({ idleWarning: true, piecesPlaced: this.piecesPlaced });
-            // Prolonged idling often means the calibration went stale (window resized,
-            // animation during the last recalibrate). Self-heal with a fresh attempt — but a
-            // {degraded} verdict must PROPAGATE (don't swallow it, or a real shrink would only
-            // restart at the segment time-cap, up to ~20 min late).
+            // Long idling often means a stale calibration: recalibrate, but let a degradation
+            // error through so the app restarts now.
             try { await this.calibrate(); lastRecal = this.piecesPlaced; }
             catch (e) { if (e && e.degraded) throw e; }
             idle = 0;
@@ -458,10 +422,8 @@ class ZenBot {
         }
         idle = 0;
         const holdBefore = st.hold;
-        // Tracking only needs queue[0] to name the next piece, so ONE known NEXT is enough to
-        // play. The exception is a hold move off an EMPTY hold: it consumes queue[0] as well, so
-        // the piece after it is queue[1]. Demanding two previews unconditionally threw away whole
-        // turns whenever one preview read badly, while the real piece kept falling.
+        // One known NEXT piece is enough, except to hold into an empty slot, which uses up
+        // queue[0] as well.
         const canHold = holdBefore ? true : queueBefore.length >= 2;
         if (!mvReady) {
           const sim = Board.fromMatrix(st.stackFilled);
@@ -483,12 +445,9 @@ class ZenBot {
         if (onTurn) onTurn({ mv, piecesPlaced: this.piecesPlaced, linesEstimate: this.linesEstimate,
                              stageUps: this.stageUps, resyncs: this.resyncs, mispredicts: this.mispredicts });
         if (this.opts.pipelineRead) {
-          // RAPID: run the board capture AND the next move computation DURING the
-          // spawn-margin wait instead of after it, taking read (~60ms) + pickMove (~35ms)
-          // off the critical path. Wait a short settle first so the locked stack is
-          // rendered — longer when this drop cleared lines, so the clear animation has
-          // collapsed before we look. Errors resolve to null (fresh read next iteration);
-          // the catch is inside the async fn so nothing rejects unhandled.
+          // RAPID: read the board and pick the next move while waiting after the drop, after a
+          // short settle (longer after a line clear). A failure gives null and the next turn
+          // reads again.
           const settle = mv.expectedResult.linesCleared > 0 ? this.opts.settleClearMs : this.opts.settleMs;
           pending = (async () => {
             try {

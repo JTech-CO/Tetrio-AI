@@ -18,21 +18,16 @@ const KEYS = {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// Reject if a promise doesn't settle within ms. The underlying CDP command may still be
-// in flight afterwards (harmless — its late result is ignored). Guards against the
-// captureScreenshot HANG that happens when the window is occluded and showing a STATIC
-// screen (a menu): with no compositor frames being produced, the capture never returns.
+// Rejects if the promise takes longer than ms (the CDP command may still finish; its result is
+// ignored). A capture of a static screen in a hidden window can otherwise never return.
 function withTimeout(promise, ms, label = 'op') {
   let timer;
   const t = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(label + ' timeout after ' + ms + 'ms')), ms); });
   return Promise.race([promise, t]).finally(() => clearTimeout(timer));
 }
 
-// Precise sleep: Windows quantizes setTimeout to ~15.6ms ticks, which silently inflates
-// every short key-timing sleep (an 8ms gap really takes ~15.6ms). Hybrid approach:
-// coarse setTimeout for the bulk, then a setImmediate spin for the final <=18ms —
-// keeps the event loop servicing I/O while hitting ~1ms accuracy. Used for RAPID key
-// timing; not worth the CPU for long waits.
+// Accurate short sleep for key timing: Windows rounds setTimeout up to ~15.6ms. Sleeps coarsely,
+// then spins on setImmediate for the last ~18ms.
 const preciseSleep = (ms) => new Promise((res) => {
   const target = process.hrtime.bigint() + BigInt(Math.round(ms * 1e6));
   const spin = () => { if (process.hrtime.bigint() >= target) res(); else setImmediate(spin); };
@@ -40,19 +35,14 @@ const preciseSleep = (ms) => new Promise((res) => {
   if (coarse > 0) setTimeout(spin, coarse); else setImmediate(spin);
 });
 
-// Chromium serves a CLIPPED captureScreenshot by resizing the page view for the duration of the
-// capture and restoring it afterwards. If that capture is abandoned (its connection closes while
-// it is in flight) or overlaps a capture from another connection, the restore is lost and the
-// page stays at the clip's scaled size (e.g. 194x215) until the app restarts — the game lays its
-// next stage out in that corner and the field can no longer be read. TURBO's separate capture
-// connection plus a capture that outlives our timeout (a stage load makes captures slow) hit
-// exactly that. So captures across ALL connections of this process run one at a time, each
-// waiting until Chromium has ANSWERED the previous one, not merely until it timed out on our side.
+// Chromium takes a clipped screenshot by resizing the page view during the capture. If that
+// capture is abandoned or overlaps one from another connection, the view can stay at the clip's
+// size until the app restarts. So every capture in this process runs one at a time, each
+// waiting until Chromium has answered the previous one.
 let captureChain = Promise.resolve();
 
-// Say why a connection dropped. chrome-remote-interface only emits a bare 'disconnect'; the
-// close code tells a server-side close (1000/1001) from a socket that just died (1006). Its
-// own close() removes these listeners first, so only unexpected drops are reported.
+// Logs why a connection dropped (1006 = the socket died). close() removes the listener first,
+// so only unexpected drops are logged.
 function reportDrops(client, label) {
   try {
     client._ws.on('close', (code, reason) => console.warn(`[CDP] ${label} 연결 끊김 code=${code}`
@@ -80,9 +70,8 @@ class Tetrio {
     }
     if (!page) throw new Error('tetr.io page target not found — is the app running with --remote-debugging-port?');
     const client = await withTimeout(CDP({ target: page.id, port }), 10000, 'CDP attach');
-    // If any enable rejects (flaky/crashing target mid-recovery) CLOSE the socket before
-    // propagating — otherwise it leaks open and a later force-kill turns it into a zombie
-    // holding the single-instance lock. Timeout-guarded so a wedged renderer can't hang attach.
+    // On failure, close the socket before rethrowing: a leaked socket can become a zombie that
+    // holds the app's single-instance lock.
     try {
       await withTimeout(client.Runtime.enable(), 8000, 'Runtime.enable');
       await withTimeout(client.Page.enable(), 8000, 'Page.enable');
@@ -101,19 +90,15 @@ class Tetrio {
     return t;
   }
 
-  // Keep the compositor producing frames even when the window is occluded/backgrounded.
-  // Chrome throttles the compositor for hidden windows (making Page.captureScreenshot take
-  // seconds), but an ACTIVE screencast forces continuous rendering. We consume frames at a
-  // low rate/quality and discard them — we only need the side effect of an active screencast.
+  // A running screencast keeps Chromium drawing frames while the window is hidden (otherwise a
+  // screenshot can take seconds). The frames themselves are discarded.
   async keepCompositorAwake() {
     if (this._screencasting) return;
     this.client.Page.screencastFrame(({ sessionId }) => {
       this.client.Page.screencastFrameAck({ sessionId }).catch(() => {});
     });
-    // Guard against a hang on a wedged renderer — best-effort warming, never block forever.
-    // Only mark active AFTER startScreencast actually resolves; if it times out it may still
-    // start late on the backend, so cancel it (else an orphaned screencast would keep rendering
-    // through the whole following play segment, stressing an already-degrading renderer).
+    // A start that timed out may still begin later, so stop it explicitly; an orphaned
+    // screencast would keep rendering for the whole session.
     try {
       await withTimeout(this.client.Page.startScreencast({ format: 'jpeg', quality: 15, everyNthFrame: 2 }), 5000, 'startScreencast');
       this._screencasting = true;
@@ -131,8 +116,7 @@ class Tetrio {
   }
 
   async eval(expression, { awaitPromise = false, timeout = 15000 } = {}) {
-    // `timeout` is V8's script-run limit; withTimeout bounds the PROTOCOL round-trip so a
-    // stalled renderer (socket open, main thread hung) can't hang the caller forever.
+    // `timeout` limits the script; withTimeout limits the round-trip, in case the renderer hangs.
     const r = await withTimeout(
       this.client.Runtime.evaluate({ expression, returnByValue: true, awaitPromise, timeout }),
       timeout + 3000, 'eval');
@@ -142,9 +126,8 @@ class Tetrio {
     return r.result.value;
   }
 
-  // One gated capture (see captureChain). The timeout covers the wait for earlier captures too,
-  // so a wedged one still turns into a fast failure; a capture whose caller already gave up
-  // before its turn is skipped instead of piling stale work onto the renderer.
+  // One capture through the shared queue (see captureChain). The timeout includes the wait in
+  // the queue; a capture whose caller already gave up is skipped.
   _capture(opts, timeoutMs) {
     let abandoned = false;
     const answered = captureChain.then(() => {
@@ -217,9 +200,8 @@ class Tetrio {
     this.pressedKeys.delete(name);
   }
 
-  // A connection that died mid-press leaves that key held inside the game, where it swallows
-  // every later press of it as a repeat (a held Space ignores each new hard drop). A fresh
-  // connection cannot know what the dead one held, so it releases every key it might use.
+  // A connection that dropped mid-press leaves that key held in the game, which then ignores
+  // new presses of it (a held Space swallows every hard drop). A new connection releases all.
   async releaseAllKeys() {
     await Promise.allSettled(Object.keys(KEYS).map(name => this.keyUp(name)));
   }
@@ -278,8 +260,7 @@ class Tetrio {
       try {
         await Promise.allSettled([...this.pressedKeys].map(name => this.keyUp(name)));
         await this.stopKeepAwake();
-        // Never close under an unanswered capture (see captureChain). Bounded: a wedged renderer
-        // may never answer, and the supervisor restarts the app in that case anyway.
+        // Never close with a capture unanswered (see captureChain); bounded for a wedged renderer.
         await withTimeout(this.pendingCapture || Promise.resolve(), 10000, 'capture drain').catch(() => {});
       } finally { await this.client.close(); }
     })();

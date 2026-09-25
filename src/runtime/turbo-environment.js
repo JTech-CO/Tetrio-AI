@@ -2,15 +2,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-// Use the game's existing settings controls, not its internal board/queue state.
-// Only visual effects that invalidate fixed pixel coordinates are changed. Restore
-// the user's settings when leaving TURBO, including on failed calibration.
+// Turns off the game's bounce, shake and action text (they move the field) through its own
+// settings controls, in every mode, and restores the user's values afterwards.
 const VIDEO_PROFILE = { bounciness: 0, shakiness: 0, actiontext: 'off' };
-// While the effects are pinned, the user's own values are journaled here and a completed restore
-// deletes the journal. Finding the game pinned WITH a journal means a restore was lost (a dropped
-// connection, a killed process) and the journal holds the user's values — reading the game then
-// would take the PINNED values for the user's own and "restore" those for good. Pinned WITHOUT a
-// journal means the user chose these values themselves.
+// The user's values are saved here while the effects are off, and the file is deleted after a
+// restore. Finding the effects off with the file present means a restore was lost, so the file
+// wins; without the file, the user chose these values.
 const JOURNAL = path.resolve(__dirname, '../../probe/video-original.json');
 const isPinned = v => Object.keys(VIDEO_PROFILE).every(k => v[k] === VIDEO_PROFILE[k]);
 

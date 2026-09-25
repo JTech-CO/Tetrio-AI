@@ -1,6 +1,5 @@
-// Focus/visibility spoofing: make TETR.IO believe it always has focus,
-// so it never pauses with the "OUT OF FOCUS" overlay while the window is backgrounded.
-// (Proven bypass from the browser-era attempts; combined with CDP focus emulation.)
+// Makes the page believe it always has focus, so TETR.IO never pauses with "OUT OF FOCUS"
+// while the window is in the background.
 
 const SPOOF_SCRIPT = `(() => {
   if (window.__focusSpoofed) return 'already';
@@ -22,9 +21,8 @@ const SPOOF_SCRIPT = `(() => {
 })()`;
 
 async function applyFocusSpoof(tetrio) {
-  // For the current document
+  // Now, and again on every page load.
   const now = await tetrio.eval(SPOOF_SCRIPT);
-  // And for any future reload/navigation
   await tetrio.client.Page.addScriptToEvaluateOnNewDocument({ source: SPOOF_SCRIPT });
   return now;
 }

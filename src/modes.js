@@ -1,30 +1,14 @@
 'use strict';
-// Play-mode presets. Selected/switched from the CONSOLE (run.js) — no in-game overlay.
-//
-// BASIC — the proven stable profile: serial read-every-turn loop, ~2.4-2.6 pieces/sec,
-//         ~0% misplacement (live-swept 2026-07).
-// RAPID — speed profile: sustained ~3.4-3.7 pps, clean-stretch bursts up to 4.2 pps at
-//         0% miss (measured 2026-07-18). Four levers on top of BASIC:
-//   1. pipelineRead: the post-drop board capture AND the next pickMove run DURING the
-//      spawn-margin wait (postDropMs) instead of after it — read (~58ms) + pick (~12ms)
-//      leave the critical path. Self-correction (fresh read every turn) is preserved.
-//   2. preciseKeys: unquantized key timing (Windows setTimeout rounds every short sleep
-//      up to ~15.6ms — that alone cost ~15ms/tap).
-//   3. aiBeam: depth-2 child search only for the top-N placements (offline-verified
-//      quality-neutral at N=12).
-//   4. keyPenalty: the AI mildly prefers placements needing fewer keystrokes.
-// Measured floors (live): with preciseKeys, tapHold >= ~17 (span a 60fps frame) and
-// tapGap >= ~5 (gap 1 -> ~30% dropped taps); postDrop >= ~95 spawn margin. Per-piece
-// wall = keys(~105ms) + max(postDrop, settle+read+pick) + ~15ms loop overhead, so the
-// structural ceiling of this input method is ~4.2-4.5 pps; the sustained average is
-// dragged by line-clear settle turns, stage-up animations, and renderer/capture jitter.
+// Speed presets (modes) and line-clear strategies, chosen from the console (run.js).
+// BASIC reads the screen before every piece. RAPID reads and decides while it waits for the
+// next piece, with precise key timing. TURBO plans pieces ahead (src/turbo.js).
 
 const MODES = {
   BASIC: {
     key: 'BASIC',
     label: 'BASIC — 안정 우선: ~2.6 피스/초, 오배치 ~0% (검증됨)',
     opts: {
-      preciseKeys: false,  // proven quantized timing — do not change BASIC
+      preciseKeys: false,  // BASIC keeps plain setTimeout timing
       tapHoldMs: 14,
       tapGapMs: 10,
       afterRotateMs: 14,
@@ -39,17 +23,17 @@ const MODES = {
     key: 'RAPID',
     label: 'RAPID — 속도 우선: 지속 ~3.5 · 순간 ~4.2 피스/초, 오배치 ~3% (자가 교정됨)',
     opts: {
-      preciseKeys: true,   // unquantized key timing (see cdp.js preciseSleep)
-      tapHoldMs: 17,       // REAL ms: span a 60fps frame (16.7ms)
-      tapGapMs: 5,         // REAL ms floor — gap 1 drops ~30% of taps (measured live)
+      preciseKeys: true,   // see cdp.js preciseSleep
+      tapHoldMs: 17,       // at least one 60fps frame, or the game can miss the key
+      tapGapMs: 5,         // shorter gaps drop taps
       afterRotateMs: 10,
-      postDropMs: 95,      // keys go out max(postDropMs, settleMs+read+pick) after the drop
+      postDropMs: 95,      // earliest next input after a hard drop
       pipelineRead: true,
-      settleMs: 15,        // wait before the pipelined capture (stack must be rendered)
+      settleMs: 15,        // wait before reading, so the dropped piece is drawn
       settleClearMs: 70,   // longer when the drop cleared lines (clear animation)
-      captureCell: 17,     // smaller capture -> ~58ms reads (22 -> ~72ms)
-      keyPenalty: 1.0,     // Dellacherie scale: ~7.9/hole — offline-checked quality-neutral
-      aiBeam: 12,          // prune depth-2 search to top-12 placements (~35ms -> ~12ms)
+      captureCell: 17,     // capture pixels per cell; smaller reads faster
+      keyPenalty: 1.0,     // prefer placements that need fewer key presses
+      aiBeam: 12,          // look ahead only from the best 12 placements
     },
   },
 };
@@ -61,13 +45,8 @@ MODES.TURBO = {
     turboFallback: 'RAPID', verifyTimeoutMs: 400, maxMismatchStreak: 2 },
 };
 
-// Line-clear strategy, orthogonal to the mode: any mode plays either one. It takes effect on
-// the very next decision.
-// SINGLE — Dellacherie: clears a line as soon as it can (mostly singles, some doubles).
-// QUAD   — stacks columns 1-9 flat, keeps the right column open, and clears four rows at once
-//          with a vertical I; below QUAD_DANGER_HEIGHT only (src/ai.js), above it plays SINGLE
-//          until the stack is low again. Offline (probe/quad_sim.js, 18k pieces): ~94% of lines
-//          as quads, 2.5x the guideline score per piece, 0 top-outs.
+// Line-clear strategy, independent of the mode. SINGLE clears lines as soon as it can; QUAD
+// keeps the right column open and clears four rows at once with an I (src/ai.js).
 const STRATEGIES = {
   SINGLE: { key: 'SINGLE', label: 'SINGLE — 줄이 차는 대로 바로 클리어 (대부분 1줄)' },
   QUAD: { key: 'QUAD', label: 'QUAD — 오른쪽 끝 열을 비워 두고 I 미노로 4줄 한 번에 클리어' },

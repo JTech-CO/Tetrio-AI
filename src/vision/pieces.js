@@ -1,8 +1,5 @@
-// Identify tetromino TYPE by SHAPE (normalized cell set), disambiguating I from S
-// which share a green-ish hue in TETR.IO's default skin.
-//
-// A shape is given as a set of [dc,dr] filled cells (any offset); we normalize to min-corner
-// and match against the canonical footprints of each piece across all 4 rotations.
+// Names a tetromino from the shape of its cells, in any rotation. Colour alone can't tell
+// I from S: both are green-ish in TETR.IO's default skin.
 
 const CANON = {
   I: [[0,0],[1,0],[2,0],[3,0]],
@@ -68,15 +65,9 @@ function connectedComponents(filled) {
   return comps;
 }
 
-// Separate the current falling piece from the locked stack.
-//
-// The falling piece is the topmost connected component when it floats above the pile
-// (a vertical gap separates it from everything below). At spawn a 3-wide piece shows only
-// its bottom row (3 cells) because its top row sits in the hidden area, so we accept a
-// floating component of ANY size 1..4 as the current piece and remove it from the stack.
-// The letter is resolved by shape only when all 4 cells are visible; otherwise letter=null
-// (the caller should rely on queue-tracking for identity).
-//
+// Separates the falling piece from the locked stack: the topmost group of cells, if it floats
+// above everything else. Right after spawn only part of it is visible, so 1-4 cells count; the
+// letter is named only when all 4 are visible (otherwise the caller relies on queue tracking).
 // Returns { piece: {letter|null, cells, partial}|null, stackFilled }.
 function extractCurrentPiece(filled) {
   const comps = connectedComponents(filled);
@@ -88,9 +79,8 @@ function extractCurrentPiece(filled) {
   let restMinRow = Infinity;
   for (let i = 1; i < sorted.length; i++) restMinRow = Math.min(restMinRow, sorted[i].minRow);
   const floating = sorted.length === 1 ? true : (restMinRow - maxRowOfTop >= 1);
-  // Treat as the falling piece if it is small (<=4), floats above the pile, and sits in the
-  // upper portion of the field (a generous bound tolerating gravity/latency between spawn and
-  // read — the AI keeps the pile low, so the only floating thing up here is the current piece).
+  // Small, floating, and in the upper part of the field: the AI keeps the stack low, so
+  // nothing else floats up there.
   if (top.size <= 4 && floating && top.minRow <= 12) {
     const letter = top.size === 4 ? identifyPiece(top.cells) : null;
     const stackFilled = filled.map(r => r.slice());

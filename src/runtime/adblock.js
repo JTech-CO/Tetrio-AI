@@ -80,11 +80,8 @@ async function applyCosmetics(tetrio) {
   })()`);
 }
 
-// Remove ad iframes/containers from the DOM. The page's ad code keeps CREATING iframe
-// elements even when their network requests are blocked; left alone they accumulate over
-// minutes and eventually crash the renderer (window shrinks to minimum + freezes). Sweeping
-// them out periodically keeps the DOM small. TETR.IO itself renders to a <canvas>, so no
-// same-origin/recaptcha iframe the game needs is touched.
+// The page keeps creating ad iframes even with their requests blocked; left alone they pile up
+// and crash the renderer. The game draws on a canvas, so removing them is safe.
 const SWEEP_SCRIPT = `(() => {
   let removed = 0;
   const KEEP = /(^about:blank$)?/; // (unused placeholder)

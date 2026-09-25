@@ -1,15 +1,8 @@
 'use strict';
-// Auto-navigate the TETR.IO menus into a ZEN game, hands-off. Needed for autonomous recovery:
-// a clean relaunch AUTO-RESUMES the in-progress ZEN board most of the time, but when it doesn't
-// (a force-kill lost the session, or an intermittent boot-to-HOME) the app sits on the HOME
-// menu and something has to drive HOME -> SOLO -> ZEN -> START. ZEN progress is account-saved,
-// so starting a fresh ZEN game just continues from the saved stage.
-//
-// Uses DOM to locate menu tiles by their STABLE ids (verified live 2026-07-18) then dispatches
-// a real CDP mouse click at the element center (TETR.IO's custom UI reacts to synthesized mouse
-// events; DOM lookup makes it window-size-independent, unlike fixed pixel coords):
-//   HOME SOLO tile = #play_solo ; SOLO->ZEN tile = #game_zen ; ZEN START = #start_zen
-//   (avoid #zen_destroy = RESET, which wipes ZEN progress); announcement popup = #ban_skip_button.
+// Drives the menus HOME -> SOLO -> ZEN -> START when a relaunch lands on HOME instead of
+// resuming ZEN (ZEN progress is saved on the account, so a new game continues it).
+// Tiles are found by DOM id and clicked with real mouse events. Never click #zen_destroy:
+// it resets ZEN progress.
 
 const { sleep } = require('./cdp.js');
 const { Vision } = require('../vision/vision.js');
@@ -38,10 +31,8 @@ async function clickId(t, id) {
   return true;
 }
 
-// Drive the menus into a live ZEN game. State-tolerant: each pass clicks the MOST-ADVANCED
-// reachable step (START if we're already on the ZEN screen, else the ZEN tile, else SOLO), so
-// it recovers from whatever screen the app happens to be on. Returns true iff a ZEN field is
-// visible before the deadline.
+// Clicks the furthest menu step visible, so it works from any screen. True once a ZEN field
+// is visible.
 async function enterZen(t, { log = () => {}, timeoutMs = 45000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
