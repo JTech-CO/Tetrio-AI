@@ -15,6 +15,7 @@
   <img alt="Target: TETR.IO ZEN" src="https://img.shields.io/badge/target-TETR.IO%20ZEN-7c3aed">
   <img alt="Tests: 98 passing" src="https://img.shields.io/badge/tests-98%20passing-2ea44f">
   <img alt="Dependencies: 3" src="https://img.shields.io/badge/dependencies-3-555555">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <br>
   <img alt="AI: hand-tuned heuristic, no ML" src="https://img.shields.io/badge/AI-hand--tuned%20heuristic%2C%20no%20ML-db2777">
   <img alt="TURBO: 6.99 pieces per second" src="https://img.shields.io/badge/TURBO-6.99%20PPS-0891b2">
@@ -206,3 +207,7 @@ TURBO는 창 크기마다 입력 보정이 필요합니다. 처음 보는 크기
 - [플레이 로그 모음](docs/PLAY-LOGS-KR.md)
 - [TURBO 동작·검증](docs/TURBO-RESULTS-KR.md)
 - [BASIC·RAPID 안정성 장치](docs/LEGACY-DEBUG-KR.md)
+
+## 라이선스
+
+[MIT](LICENSE) © 2026 JTech_CO
