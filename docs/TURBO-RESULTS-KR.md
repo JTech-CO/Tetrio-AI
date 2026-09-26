@@ -1,6 +1,6 @@
 # TURBO 동작·검증
 
-TURBO는 가장 빠른 속도입니다. 낯선 용어는 [README의 용어](../README.ko.md#용어)를 보세요.
+TURBO는 가장 빠른 속도입니다. 낯선 용어는 [README의 용어](../README-KR.md#용어)를 보세요.
 
 ## 동작 방식
 

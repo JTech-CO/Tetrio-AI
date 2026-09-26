@@ -21,7 +21,7 @@
   <img alt="QUAD: 93.9% of lines as quads" src="https://img.shields.io/badge/QUAD-93.9%25%20quads-0891b2">
 </p>
 
-<p align="center"><b>English</b> · <a href="README.ko.md">한국어</a></p>
+<p align="center"><b>English</b> · <a href="README-KR.md">한국어</a></p>
 
 > For research into TETR.IO gameplay. Using it in ranked or other competitive modes can get your account restricted, and that risk is yours.
 
