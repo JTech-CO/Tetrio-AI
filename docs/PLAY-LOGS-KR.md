@@ -1,6 +1,6 @@
 # 플레이 로그 모음
 
-실게임 실행 기록을 최신순으로 모았습니다. 링크를 누르면 원본 로그가 열립니다. 모두 Windows, TETR.IO Desktop 10.0.0에서 측정했습니다. 낯선 용어는 [README의 용어](../README.md#용어)를 보세요.
+실게임 실행 기록을 최신순으로 모았습니다. 링크를 누르면 원본 로그가 열립니다. 모두 Windows, TETR.IO Desktop 10.0.0에서 측정했습니다. 낯선 용어는 [README의 용어](../README.ko.md#용어)를 보세요.
 
 ## 읽는 법
 
@@ -88,4 +88,4 @@ BASIC·SINGLE은 레벨 전환(180→220피스)을 뺀 두 구간을 합쳐 계�
 
 - [TURBO 동작·검증](TURBO-RESULTS-KR.md)
 - [BASIC·RAPID 안정성 장치](LEGACY-DEBUG-KR.md)
-- README 그래프: [속도](../README.md#속도) · [라인 클리어 방식](../README.md#라인-클리어-방식) · [실게임 기록](../README.md#실게임-기록)
+- README 그래프: [속도](../README.ko.md#속도) · [라인 클리어 방식](../README.ko.md#라인-클리어-방식) · [실게임 기록](../README.ko.md#실게임-기록)

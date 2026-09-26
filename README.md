@@ -1,19 +1,42 @@
-# TETR.IO ZEN 자동 플레이 봇
+<p align="center">
+  <img src="images/1-main.png" alt="A robot studying a TETR.IO board" width="100%">
+</p>
 
-Windows용 TETR.IO 데스크톱 앱의 ZEN 모드를 자동으로 플레이합니다. CDP로 화면을 읽고, 로컬 AI가 배치를 정해 블럭을 놓습니다. 테트리오 게임플레이 연구·실험용이며, 이를 랭킹전 등에 사용했을 시 계정 제한 등 불이익은 사용자 본인에게 있습니다.
+<h1 align="center">Tetrio-AI</h1>
 
-테트리스나 TETR.IO가 처음이라면 [용어](#용어)부터 보세요.
+<p align="center">
+  An autonomous player for TETR.IO's ZEN mode. It reads the screen of the desktop app,<br>
+  decides every placement with a local evaluator, and plays at up to about 7 pieces per second.
+</p>
 
-## 시작
+<p align="center">
+  <img alt="Node.js 18+" src="https://img.shields.io/badge/Node.js-18%2B-339933?logo=nodedotjs&logoColor=white">
+  <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows-0078D4">
+  <img alt="Target: TETR.IO ZEN" src="https://img.shields.io/badge/target-TETR.IO%20ZEN-7c3aed">
+  <img alt="Tests: 98 passing" src="https://img.shields.io/badge/tests-98%20passing-2ea44f">
+  <img alt="Dependencies: 3" src="https://img.shields.io/badge/dependencies-3-555555">
+  <br>
+  <img alt="AI: hand-tuned heuristic, no ML" src="https://img.shields.io/badge/AI-hand--tuned%20heuristic%2C%20no%20ML-db2777">
+  <img alt="TURBO: 6.99 pieces per second" src="https://img.shields.io/badge/TURBO-6.99%20PPS-0891b2">
+  <img alt="QUAD: 93.9% of lines as quads" src="https://img.shields.io/badge/QUAD-93.9%25%20quads-0891b2">
+</p>
 
-Node.js 18 이상과 TETR.IO 데스크톱 앱(`%LOCALAPPDATA%\Programs\tetrio-desktop\TETR.IO.exe`)이 필요합니다.
+<p align="center"><b>English</b> · <a href="README.ko.md">한국어</a></p>
+
+> For research into TETR.IO gameplay. Using it in ranked or other competitive modes can get your account restricted, and that risk is yours.
+
+New to Tetris or TETR.IO? Start with the [glossary](#glossary).
+
+## Quick start
+
+You need Node.js 18 or later and the TETR.IO desktop app (`%LOCALAPPDATA%\Programs\tetrio-desktop\TETR.IO.exe`).
 
 ```bash
 npm install
 npm start
 ```
 
-ZEN 화면을 찾으면 시작 메뉴가 뜹니다. 콘솔에 `[속도]-[방식]` + Enter로 속도와 라인 클리어 방식을 고르며, 플레이 중에도 같은 명령으로 바꿉니다.
+A menu appears once the bot finds the ZEN screen. Type `[speed]-[strategy]` and Enter in the console to pick both; the same command switches them during play.
 
 | | SINGLE (`s`) | QUAD (`q`) |
 |---|---|---|
@@ -21,115 +44,167 @@ ZEN 화면을 찾으면 시작 메뉴가 뜹니다. 콘솔에 `[속도]-[방식]
 | **RAPID** (`2`) | `2-s` | `2-q` |
 | **TURBO** (`3`) | `3-s` | `3-q` |
 
-`status`는 통계, `Ctrl+C`는 종료입니다. 플레이 중에는 TETR.IO 창을 가리지 마세요. 가려지면 게임이 멈춥니다.
+`status` prints statistics and `Ctrl+C` quits. Keep the TETR.IO window uncovered while it plays: a hidden window pauses the game.
 
-봇은 TETR.IO를 디버그 포트(9222)를 연 채로 실행하고, 봇이 끝나도 앱은 그 상태로 계속 돕니다. 포트가 열려 있는 동안에는 같은 PC의 다른 프로그램이 로그인된 게임을 조작할 수 있으니, 다 쓴 뒤에는 TETR.IO를 종료하세요.
+The bot runs TETR.IO with its debug port (9222) open, and the app keeps running that way after the bot exits. While the port is open, other programs on the same PC can drive the logged-in game, so close TETR.IO when you are done.
 
-## 속도
+## Speeds
 
-| 속도 | 동작 | 실측 피스/초 |
+| Speed | How it plays | Measured pieces/s |
 |---|---|---:|
-| BASIC | 매 피스 화면을 읽은 뒤 계산하고 입력 | 2.3~2.4 |
-| RAPID | 화면 읽기와 계산을 새 피스 대기와 겹쳐 수행 | 4.1~4.3 |
-| TURBO | 창 크기별로 보정한 입력으로 최대 2피스 앞서 두고, 화면 검증은 뒤에서 따로 | 5.8~7.0 |
+| BASIC | Reads the screen after every piece, then decides and presses keys | 2.3–2.4 |
+| RAPID | Reads the screen and decides while waiting for the next piece | 4.1–4.3 |
+| TURBO | Plans up to two pieces ahead with input timing calibrated per window size, and checks the screen in the background | 5.8–7.0 |
 
-**파랑 = SINGLE, 주황 = QUAD.** 레벨 전환이 없는 구간의 실측값입니다.
+**Blue = SINGLE, orange = QUAD.** Measured on stretches without a level transition.
 
 ```mermaid
 %%{init: {"xyChart": {"height": 360}, "themeVariables": {"xyChart": {"plotColorPalette": "#3987e5, #d95926"}}}}%%
 xychart-beta
-    title "속도·방식별 플레이 속도 (피스/초)"
+    title "Play speed by speed and strategy (pieces/s)"
     x-axis ["BASIC·SINGLE", "BASIC·QUAD", "RAPID·SINGLE", "RAPID·QUAD", "TURBO·SINGLE", "TURBO·QUAD"]
-    y-axis "피스/초" 0 --> 8
-    %% 음수 = 막대 없음. mermaid는 0도 8px 막대로 그리므로 값이 없는 칸은 -5로 둔다.
+    y-axis "pieces/s" 0 --> 8
+    %% A negative value draws no bar: mermaid draws 0 as an 8px bar.
     bar [2.42, -5, 4.13, -5, 5.84, -5]
     bar [-5, 2.33, -5, 4.29, -5, 6.99]
 ```
 
-## 라인 클리어 방식
+## Line-clear strategies
 
-| 방식 | 플레이 |
+| Strategy | How it plays |
 |---|---|
-| SINGLE | 줄이 차는 대로 바로 지웁니다. 대부분 1줄 클리어입니다 |
-| QUAD | 오른쪽 끝 열을 비워 두고 쌓은 뒤, 세운 I 미노로 4줄을 한 번에 지웁니다. 스택이 10줄을 넘으면 잠시 SINGLE처럼 낮춥니다 |
+| SINGLE | Clears a line as soon as it can; mostly single-line clears |
+| QUAD | Keeps the right-hand column empty, stacks the rest, and clears four lines at once with a vertical I. Above 10 rows it clears like SINGLE until the stack is low again |
 
 ```mermaid
 %%{init: {"xyChart": {"height": 280}, "themeVariables": {"xyChart": {"plotColorPalette": "#3987e5"}}}}%%
 xychart-beta
-    title "SINGLE — 지운 줄의 클리어 크기별 비율 (%)"
-    x-axis ["1줄", "2줄", "3줄", "4줄 (쿼드)"]
+    title "SINGLE — lines cleared, by clear size (%)"
+    x-axis ["1 line", "2 lines", "3 lines", "4 lines (quad)"]
     y-axis "%" 0 --> 100
-    %% 음수 = 막대 없음(0%).
+    %% A negative value draws no bar (0%).
     bar [79.9, 19.6, 0.5, -10]
 ```
 
 ```mermaid
 %%{init: {"xyChart": {"height": 280}, "themeVariables": {"xyChart": {"plotColorPalette": "#d95926"}}}}%%
 xychart-beta
-    title "QUAD — 지운 줄의 클리어 크기별 비율 (%)"
-    x-axis ["1줄", "2줄", "3줄", "4줄 (쿼드)"]
+    title "QUAD — lines cleared, by clear size (%)"
+    x-axis ["1 line", "2 lines", "3 lines", "4 lines (quad)"]
     y-axis "%" 0 --> 100
     bar [3.2, 0.5, 2.4, 93.9]
 ```
 
-QUAD는 피스당 점수가 SINGLE의 **2.5배**(110.7 대 44.0)입니다. 실게임에서도 지운 줄의 93.5~95%가 쿼드였습니다. 대신 스택이 평균 5.4줄로 SINGLE(2.8줄)보다 높게 쌓입니다. 비율과 점수는 오프라인 시뮬레이션에서 방식마다 18,000피스를 둔 결과입니다.
+QUAD scores **2.5 times** as many points per piece as SINGLE (110.7 against 44.0), and 93.5–95% of its lines were quads in the real game too. The price is a taller stack: 5.4 rows on average against 2.8. The shares and scores come from 18,000 simulated pieces per strategy.
 
-## 실게임 기록
+## How the AI works
+
+The "AI" is not a trained neural network. It is a classic search over every possible placement, scored by a formula with a handful of weights. It needs no GPU, no training data and no network access, and it decides in under 2 ms.
+
+```mermaid
+flowchart LR
+    A["Screen capture<br>(CDP, JPEG)"] --> B["Pixel vision<br>board · NEXT · HOLD"]
+    B --> C["Board model<br>10×24 bitboard, SRS"]
+    C --> D["Search<br>every placement<br>+ one piece ahead"]
+    D --> E["Evaluator<br>SINGLE or QUAD weights"]
+    E --> F["Key sequence<br>(CDP key events)"]
+```
+
+1. **Vision:** the bot reads the 10×20 field cell by cell. A cell counts as filled when its colour is bright and saturated enough, and its hue names the piece (yellow O, cyan I, and so on). NEXT and HOLD pieces are recognised by shape. Nothing here is learned; the thresholds are fixed.
+2. **Search:** every placement the keys can reach (rotation × column, at most 34 per piece) is tried for the current piece and for the held piece. The bot then looks one piece ahead from each result. That is up to about 2,300 boards per decision; RAPID and TURBO look ahead only from the best 12.
+3. **Evaluation:** each resulting board gets a score, and the highest wins.
+
+### Parameters
+
+SINGLE uses Pierre Dellacherie's hand-tuned evaluator (2003; see Thiery & Scherrer, *Building Controllers for Tetris*, 2009):
+
+| Feature | Weight |
+|---|---:|
+| Landing height of the piece | −4.500 |
+| Eroded cells (lines cleared × own cells in them) | +3.418 |
+| Row transitions (filled ↔ empty, left to right) | −3.217 |
+| Column transitions (filled ↔ empty, top to bottom) | −9.348 |
+| Holes | −7.899 |
+| Cumulative well depth | −3.386 |
+
+QUAD keeps the same stack terms, treats the right-hand column as a wall, and replaces the eroded-cells term with:
+
+| Term | Value |
+|---|---:|
+| Each filled cell in the right-hand column | −20 |
+| A four-line clear | +60 |
+| Each line cleared one to three at a time | −10 |
+| An I piece kept in HOLD | +30 |
+| Stack height at which QUAD scores like SINGLE | 10 rows |
+
+Other settings: RAPID subtracts 1 point per key press so near-equal placements need fewer keys, and TURBO subtracts 0.01 points per millisecond of expected input time instead. In total the evaluator has **11 hand-set values (6 SINGLE + 5 QUAD) and no learned parameters**.
+
+### How the weights were chosen
+
+- **SINGLE:** Dellacherie's published weights, used as they are.
+- **QUAD:** tuned offline with [`probe/quad_sim.js`](probe/quad_sim.js), a Tetris simulator with the same rules the bot sees (7-bag, five NEXT pieces, HOLD).
+  - About 30 weight combinations were played, each for at least 6,000 pieces, and compared on the share of quads, score per piece, stack height and game-overs.
+  - The best combination was checked on six unseen piece sequences of 3,000 pieces each, then confirmed in the real game (93.5–95% quads).
+- **TURBO input timing:** measured, not tuned. The first time TURBO runs at a window size, it plays 120 pieces at each spawn delay (120, 95, 80, 65 ms) and keeps the fastest one with no misplacement.
+
+## Real-game results
 
 ```mermaid
 %%{init: {"xyChart": {"height": 360}, "themeVariables": {"xyChart": {"plotColorPalette": "#d95926"}}}}%%
 xychart-beta
-    title "TURBO·QUAD 1,500피스 — 최근 속도 (피스/초)"
-    x-axis "피스" 20 --> 1500
-    y-axis "피스/초" 0 --> 9
+    title "TURBO·QUAD, 1,500 pieces — recent speed (pieces/s)"
+    x-axis "pieces" 20 --> 1500
+    y-axis "pieces/s" 0 --> 9
     line [6.92, 6.85, 7.06, 7.05, 6.61, 7.09, 7.48, 6.78, 7.19, 7.09, 7.27, 7.11, 7.15, 7.35, 6.77, 7.51, 6.76, 6.66, 1.7, 1.69, 6.97, 7.07, 6.66, 7.21, 6.7, 6.58, 6.75, 6.81, 7.43, 6.94, 4.77, 6.76, 7.23, 7.35, 7.32, 7.39, 7.01, 6.9, 6.97, 7.2, 7.18, 7.09, 6.84, 7.09, 6.77, 7.09, 7.24, 8.09, 7.22, 7.16, 6.94, 6.99, 6.82, 6.73, 6.84, 6.89, 6.84, 1.7, 1.7, 6.96, 6.28, 6.65, 6.76, 6.68, 7.05, 6.86, 6.98, 7.45, 7.09, 7.11, 6.68, 7.75, 7.43, 7, 6.62]
 ```
 
-TURBO·QUAD로 1,500피스를 282초에 두었고, 쿼드는 140회, 오배치는 0회였습니다. 평소 약 7 피스/초를 유지했습니다. 속도가 떨어진 세 곳은 레벨 전환 2회와 높은 스택 1회로, 그동안은 RAPID가 맡았다가 TURBO로 돌아왔습니다.
+TURBO·QUAD placed 1,500 pieces in 282 s with 140 quads and no misplacement, holding about 7 pieces/s. The three dips are two level transitions and one tall stack, where RAPID took over until TURBO could resume.
 
-모든 실행 기록과 그래프 데이터의 출처는 **[플레이 로그 모음](docs/PLAY-LOGS-KR.md)** 에 있습니다.
+Every run and the source of each chart are in the **[play log index](docs/PLAY-LOGS-KR.md)** (Korean).
 
-## 실행 옵션
+## Options
 
-| 옵션 | 기본값 | 용도 |
+| Option | Default | Purpose |
 |---|---|---|
-| `--mode basic/rapid/turbo` | basic | 시작 속도 |
-| `--strategy single/quad` (`s`/`q`) | single | 라인 클리어 방식 |
-| `--pieces N` | 무제한 | 배치 수 제한 |
-| `--port P` | 9222 | CDP 포트 |
-| `--calibration FILE` | 창 크기별 자동 선택 | 지정한 TURBO 보정 파일만 사용 |
-| `--restart` | 꺼짐 | 앱 재시작 |
-| `--restart-every N` / `--restart-mins M` | 2500 / 20 | 먼저 도달한 조건에서 재시작, 0은 해제 |
-| `--quality Q` | 85 | JPEG 품질(1–100) |
-| `--postdrop N` | 모드별 | BASIC/RAPID 드롭 후 대기(ms, 최소 90) |
-| `--no-adblock` | 꺼짐 | 광고 차단 비활성화 |
+| `--mode basic/rapid/turbo` | basic | Starting speed |
+| `--strategy single/quad` (`s`/`q`) | single | Line-clear strategy |
+| `--pieces N` | unlimited | Stop after N pieces |
+| `--port P` | 9222 | CDP port |
+| `--calibration FILE` | chosen per window size | Use only this TURBO calibration file |
+| `--restart` | off | Restart the app first |
+| `--restart-every N` / `--restart-mins M` | 2500 / 20 | Restart the app on whichever comes first; 0 turns one off |
+| `--quality Q` | 85 | JPEG capture quality (1–100) |
+| `--postdrop N` | per speed | BASIC/RAPID wait after a hard drop (ms, at least 90) |
+| `--no-adblock` | off | Turn off ad blocking |
 
-TURBO는 창 크기마다 입력 보정이 필요합니다. 처음 보는 크기면 시작할 때 자동으로 보정하며 2~4분 걸립니다. 최대화 창에서는 보정이 실패할 수 있으니 창 모드로 실행하세요. 자세한 내용은 [TURBO 동작·검증](docs/TURBO-RESULTS-KR.md#실행과-보정)에 있습니다.
+TURBO needs its input timing calibrated for each window size. At a new size it calibrates itself when it starts, which takes 2–4 minutes. A maximized window can fail calibration, so run TURBO in a normal window. See [TURBO: how it works and results](docs/TURBO-RESULTS-KR.md#실행과-보정) (Korean).
 
-## 용어
+## Glossary
 
-| 용어 | 뜻 |
+| Term | Meaning |
 |---|---|
-| TETR.IO | 온라인 테트리스 게임입니다. 이 봇은 Windows 데스크톱 앱을 조작합니다 |
-| ZEN | TETR.IO의 혼자 하는 무한 모드입니다. 줄을 지울수록 레벨이 오르고, 진행 상황은 계정에 저장됩니다 |
-| 피스 | 네 칸짜리 블록(미노)입니다. I·O·T·S·Z·J·L 일곱 종류가 있습니다 |
-| PPS | 초당 놓는 피스 수(pieces per second), 이 문서의 "피스/초"입니다 |
-| 스택 | 필드 바닥부터 쌓인 블록입니다. 높이는 줄 수로 셉니다 |
-| 라인 클리어 | 가로 한 줄이 꽉 차면 사라지는 것입니다. 한 번에 1줄이면 싱글, 4줄이면 쿼드입니다. 일반 클리어 중에서는 쿼드의 줄당 점수가 가장 높습니다 |
-| 하드 드롭 | 피스를 지금 위치에서 바닥까지 한 번에 떨어뜨리는 키입니다 |
-| NEXT | 다음에 나올 피스 5개를 미리 보여 주는 칸입니다 |
-| HOLD | 지금 피스를 보관했다가 나중에 꺼내 쓰는 칸입니다 |
-| 7-bag | 일곱 종류를 한 벌씩 섞어 순서대로 내보내는 방식입니다. 같은 피스가 너무 오래 안 나오는 일이 없습니다 |
-| 레벨 전환 | 레벨이 오를 때 나오는 연출입니다. 그동안 필드가 잘 보이지 않아 봇이 잠시 느려집니다 |
-| 오배치 | 봇이 계산한 자리와 다른 곳에 피스가 놓인 경우입니다. 화면으로 추정한 값입니다 |
-| CDP | Chrome DevTools Protocol입니다. 데스크톱 앱의 화면을 캡처하고 키를 보내는 통로입니다 |
-| 보정 | TURBO가 창 크기마다 키 입력 간격을 재서 저장하는 과정입니다 |
-| DAS / ARR | 방향키를 누르고 있을 때 연속 이동이 시작되기까지의 지연과 이동 속도입니다(게임 설정) |
+| TETR.IO | An online Tetris game. This bot drives its Windows desktop app |
+| ZEN | TETR.IO's endless single-player mode. Levels rise as you clear lines, and progress is saved to your account |
+| Piece | A four-cell block (mino). There are seven: I, O, T, S, Z, J, L |
+| PPS | Pieces per second |
+| Stack | The blocks piled up from the bottom of the field, measured in rows |
+| Line clear | A full row disappears. One row at a time is a single, four at once is a quad; among ordinary clears, quads score the most per line |
+| Hard drop | The key that drops a piece straight to the bottom |
+| NEXT | The preview of the next five pieces |
+| HOLD | A slot that stores the current piece for later |
+| 7-bag | The seven pieces are shuffled and dealt one full set at a time, so no piece stays away for long |
+| Level transition | The animation when the level goes up. The field is hard to read meanwhile, so the bot slows down briefly |
+| Misplacement | A piece that landed somewhere other than where the bot planned, as judged from the screen |
+| CDP | Chrome DevTools Protocol, the channel used to capture the app's screen and send keys |
+| Calibration | TURBO measuring and saving its key timing for a window size |
+| DAS / ARR | The delay before a held arrow key starts repeating, and the repeat speed (game settings) |
 
-## 개발·문서
+## Development
 
-`npm test`로 회귀 테스트를 실행합니다. AI는 `src/ai.js`, 일반 루프는 `src/bot.js`, TURBO 예측 실행은 `src/turbo.js`에 있습니다.
+`npm test` runs the regression tests. The AI is in `src/ai.js`, the board model in `src/board.js`, the BASIC/RAPID loop in `src/bot.js`, and TURBO in `src/turbo.js`.
 
-- [플레이 로그 모음](docs/PLAY-LOGS-KR.md)
-- [TURBO 동작·검증](docs/TURBO-RESULTS-KR.md)
-- [BASIC·RAPID 안정성 장치](docs/LEGACY-DEBUG-KR.md)
+Documents (Korean):
+
+- [Play log index](docs/PLAY-LOGS-KR.md)
+- [TURBO: how it works and results](docs/TURBO-RESULTS-KR.md)
+- [BASIC and RAPID safeguards](docs/LEGACY-DEBUG-KR.md)
