@@ -2,7 +2,7 @@
 // The BASIC/RAPID play loop: read the screen, pick a move, send the keys over CDP.
 // TURBO's loop is in src/turbo.js.
 
-const { Tetrio, sleep, preciseSleep } = require('./runtime/cdp.js');
+const { Tetrio, sleep } = require('./runtime/cdp.js');
 const { applyFocusSpoof } = require('./runtime/focus.js');
 const { applyAdblock, applyCosmetics, sweepAds } = require('./runtime/adblock.js');
 const { Vision } = require('./vision/vision.js');
@@ -10,13 +10,15 @@ const { extractCurrentPiece } = require('./vision/pieces.js');
 const { Board } = require('./board.js');
 const { pickMove } = require('./ai.js');
 const { knownQueue } = require('./state.js');
+const { planTaps } = require('./input/planner.js');
+const { InputExecutor } = require('./input/executor.js');
 
 const DEFAULTS = {
-  // BASIC values (presets in src/modes.js). Shorter tapHoldMs or postDropMs make the game
-  // miss keys.
-  tapHoldMs: 14,     // keydown duration for a single tap
-  tapGapMs: 10,      // gap between taps
-  afterRotateMs: 14, // extra settle after a rotate
+  // BASIC values (presets in src/modes.js). Measured floors: a hold shorter than one 60fps
+  // frame (17ms), a gap under 5ms or a shorter postDropMs make the game miss keys.
+  tapHoldMs: 17,     // keydown duration for a single tap
+  tapGapMs: 5,       // gap between taps
+  afterRotateMs: 10, // extra settle after a rotate or hold
   postDropMs: 120,   // wait after a hard drop until the next piece can be moved
   idleSleepMs: 60,   // sleep between polls while waiting to (re)bootstrap the current piece
   jpegQuality: 85,   // clip capture quality
@@ -24,7 +26,6 @@ const DEFAULTS = {
   sweepEveryMs: 6000,   // remove accumulating ad iframes this often
   // RAPID-mode levers (inert in BASIC):
   pipelineRead: false, // capture the post-drop board DURING postDropMs instead of after it
-  preciseKeys: false,  // unquantized key timing (Windows setTimeout rounds to ~15.6ms)
   settleMs: 60,        // pipelined: wait before capturing (stack must be rendered)
   settleClearMs: 160,  // pipelined: longer wait when the drop cleared lines (clear animation)
   keyPenalty: 0,       // AI score penalty per keystroke (prefers cheaper placements)
@@ -274,27 +275,18 @@ class ZenBot {
     else this.current = queueBefore[1] || null;                 // empty hold consumed queue[0]
   }
 
+  // Sends the taps on a precise schedule without waiting for each CDP reply, as TURBO does
+  // (src/input/executor.js). Awaiting replies and Windows' ~15.6ms timer ticks used to stretch
+  // every tap. Returns false when stopped; an input error releases the keys and throws.
   async runKeys(keys) {
+    if (this.stop) return false;
     const o = this.opts;
-    if (o.preciseKeys) {
-      // Precise timing (RAPID). Holds under ~17ms (one frame) or gaps under ~5ms drop taps.
-      for (let i = 0; i < keys.length; i++) {
-        if (this.stop) return false;
-        const k = keys[i];
-        try {
-          await this.t.keyDown(k);
-          await preciseSleep(o.tapHoldMs);
-        } finally { await this.t.keyUp(k); }
-        if (i === keys.length - 1) break; // no trailing gap — postDrop covers it
-        await preciseSleep(o.tapGapMs);
-        if (k === 'cw' || k === 'ccw' || k === '180' || k === 'hold') await preciseSleep(o.afterRotateMs);
-      }
-      return true;
-    }
-    for (const k of keys) {
+    const plan = planTaps(keys, { tapHoldMs: o.tapHoldMs, tapGapMs: o.tapGapMs, afterRotateMs: o.afterRotateMs });
+    try {
+      await new InputExecutor(this.t).execute(plan, { shouldStop: () => this.stop });
+    } catch (e) {
       if (this.stop) return false;
-      await this.t.tap(k, { holdMs: o.tapHoldMs, gapMs: o.tapGapMs });
-      if (k === 'cw' || k === 'ccw' || k === '180' || k === 'hold') await sleep(o.afterRotateMs);
+      throw e;
     }
     return true;
   }

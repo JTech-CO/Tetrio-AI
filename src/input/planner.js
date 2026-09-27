@@ -10,6 +10,16 @@ function planInput({ piece, rot, col, useHold = false }, c) {
   if (col < -meta.minX || col > WIDTH - 1 - meta.maxX) throw new Error('Column out of bounds');
   const keys = computeKeySequence(piece, rot, col);
   if (useHold) keys.unshift('hold');
+  return scheduleKeys(keys, c, { left: col === -meta.minX, right: col === WIDTH - 1 - meta.maxX });
+}
+
+// One tap per key (BASIC/RAPID). Simultaneous rotate+move and holding to the wall need a
+// measured TURBO profile, so they are never used here.
+function planTaps(keys, c) {
+  return scheduleKeys(keys, { ...c, overlap: false, wallHoldMs: null }, {});
+}
+
+function scheduleKeys(keys, c, wall) {
   const events = [];
   let at = 0, dropAt = 0;
   const tap = (key, duration) => {
@@ -31,8 +41,7 @@ function planInput({ piece, rot, col, useHold = false }, c) {
       at += c.tapGapMs + c.afterRotateMs;
       overlapUsed = true; i++; continue;
     }
-    const wall = k === 'left' ? col === -meta.minX : k === 'right' && col === WIDTH - 1 - meta.maxX;
-    if (wall && c.wallHoldMs != null) {
+    if (wall[k] && c.wallHoldMs != null) {
       let n = 1;
       while (keys[i + n] === k) n++;
       if (c.wallHoldMs < n * c.tapHoldMs + (n - 1) * c.tapGapMs) {
@@ -44,4 +53,4 @@ function planInput({ piece, rot, col, useHold = false }, c) {
   return { events, dropAt, durationMs: at, estimatedInputMs: at, wallUsed, overlapUsed };
 }
 
-module.exports = { planInput };
+module.exports = { planInput, planTaps };

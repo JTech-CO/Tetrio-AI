@@ -170,9 +170,13 @@ class Tetrio {
     }), 8000, 'keyDown');
   }
 
+  // Does not wait for the renderer before the next event (src/input/executor.js). Tracked in
+  // pressedKeys like keyDown, so close() still releases a key held by a scheduled plan.
   dispatchKeyEventFast(name, down) {
     const k = KEYS[name];
     if (!k) throw new Error('unknown key: ' + name);
+    if (down && this.closing) throw new Error('CDP connection is closing');
+    if (down) this.pressedKeys.add(name); else this.pressedKeys.delete(name);
     return withTimeout(this.client.Input.dispatchKeyEvent({
       type: down ? (k.text ? 'keyDown' : 'rawKeyDown') : 'keyUp',
       key: k.key, code: k.code, windowsVirtualKeyCode: k.keyCode,

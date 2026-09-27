@@ -30,21 +30,56 @@ test('CDP close releases held keys, closes once and rejects subsequent presses',
   await assert.rejects(t.keyDown('hard'), /closing/);
   assert.deepEqual(events, ['rawKeyDown:ArrowLeft', 'keyUp:ArrowLeft', 'close']);
 });
-test('RAPID releases on input error and never sends the remaining hard drop', async () => {
-  const { t, events } = transport(true);
-  const bot = new ZenBot(t, { preciseKeys: true });
-  await assert.rejects(bot.runKeys(['left', 'hard']), /lost reply/);
-  assert.deepEqual(events, ['rawKeyDown:ArrowLeft', 'keyUp:ArrowLeft']);
+test('CDP close also releases a key pressed by a scheduled plan', async () => {
+  const { t, events } = transport();
+  await t.dispatchKeyEventFast('hard', true);
+  await t.close();
+  assert.throws(() => t.dispatchKeyEventFast('left', true), /closing/);
+  assert.deepEqual(events, ['keyDown:Space', 'keyUp:Space', 'close']);
+});
+test('ordinary modes release on input error and never send the remaining hard drop', async () => {
+  for (const mode of ['BASIC', 'RAPID']) {
+    const { t, events } = transport(true);
+    const bot = new ZenBot(t, MODES[mode].opts);
+    await assert.rejects(bot.runKeys(['left', 'hard']), /lost reply/);
+    assert.equal(events[0], 'rawKeyDown:ArrowLeft');
+    assert.ok(events.includes('keyUp:ArrowLeft'));
+    assert.ok(!events.includes('keyDown:Space'));
+    assert.equal(t.pressedKeys.size, 0);
+  }
 });
 test('stopping during a key pulse prevents the remaining keys in both ordinary modes', async () => {
-  for (const preciseKeys of [false, true]) {
+  for (const mode of ['BASIC', 'RAPID']) {
     const { t, events } = transport();
-    const bot = new ZenBot(t, { preciseKeys, tapHoldMs: 0, tapGapMs: 0 });
-    const down = t.keyDown.bind(t);
-    t.keyDown = async name => { await down(name); bot.stop = true; };
+    const bot = new ZenBot(t, MODES[mode].opts);
+    const send = t.dispatchKeyEventFast.bind(t);
+    t.dispatchKeyEventFast = (name, down) => { const sent = send(name, down); if (down) bot.stop = true; return sent; };
     assert.equal(await bot.runKeys(['left', 'hard']), false);
-    assert.deepEqual(events, ['rawKeyDown:ArrowLeft', 'keyUp:ArrowLeft']);
+    assert.equal(events[0], 'rawKeyDown:ArrowLeft');
+    assert.ok(events.includes('keyUp:ArrowLeft'));
+    assert.ok(!events.includes('keyDown:Space'));
+    assert.equal(t.pressedKeys.size, 0);
   }
+});
+test('ordinary modes send taps on a precise schedule without waiting for replies', async () => {
+  const sent = [];
+  const t = new Tetrio({ Input: { async dispatchKeyEvent(e) {
+    sent.push({ at: performance.now(), event: e.type + ':' + e.code });
+    await new Promise(r => setTimeout(r, 40)); // a slow renderer reply
+  } }, async close() {} });
+  const bot = new ZenBot(t, MODES.RAPID.opts);
+  const start = performance.now();
+  assert.equal(await bot.runKeys(['cw', 'left', 'hard']), true);
+  const elapsed = performance.now() - start;
+  assert.deepEqual(sent.map(s => s.event), ['rawKeyDown:ArrowUp', 'keyUp:ArrowUp',
+    'rawKeyDown:ArrowLeft', 'keyUp:ArrowLeft', 'keyDown:Space', 'keyUp:Space']);
+  const offset = i => sent[i].at - sent[0].at;
+  assert.ok(offset(1) >= 16 && offset(1) < 35, 'hold ' + offset(1));
+  // hard drop at 17 hold + 5 gap + 10 rotate settle + 17 hold + 5 gap = 54ms
+  assert.ok(offset(4) >= 53 && offset(4) < 90, 'hard drop at ' + offset(4));
+  // Waiting for every 40ms reply would take well over 300ms.
+  assert.ok(elapsed < 200, 'elapsed ' + elapsed);
+  assert.equal(t.pressedKeys.size, 0);
 });
 test('mode switches preserve capture quality and explicit postdrop override but clear mode-only flags', () => {
   const bot = new ZenBot({}, { ...MODES.RAPID.opts, jpegQuality: 71,
@@ -59,7 +94,7 @@ test('mode switches preserve capture quality and explicit postdrop override but 
   assert.equal(bot.opts.captureCell, 17);
 });
 test('play uses the known NEXT prefix only and never shifts later identities forward', async () => {
-  const bot = new ZenBot({ async tap() {} }, { postDropMs: 0 });
+  const bot = new ZenBot({ async dispatchKeyEventFast() {} }, { postDropMs: 0 });
   // queue[0] unreadable: tracking cannot name the next piece, so nothing may be played.
   const blocked = await bot.playOnce({ hasPiece: true, current: 'T', stackFilled: empty(),
     queue: [null, 'O', 'S'], hold: null });

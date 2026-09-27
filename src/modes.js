@@ -6,12 +6,11 @@
 const MODES = {
   BASIC: {
     key: 'BASIC',
-    label: 'BASIC — 안정 우선: ~2.6 피스/초, 오배치 ~0% (검증됨)',
+    label: 'BASIC — 안정 우선: ~3.4 피스/초, 오배치 ~0% (검증됨)',
     opts: {
-      preciseKeys: false,  // BASIC keeps plain setTimeout timing
-      tapHoldMs: 14,
-      tapGapMs: 10,
-      afterRotateMs: 14,
+      tapHoldMs: 17,       // same measured key timing as RAPID and TURBO
+      tapGapMs: 5,
+      afterRotateMs: 10,
       postDropMs: 120,
       pipelineRead: false,
       settleMs: 60,        // unused while pipelineRead is off
@@ -23,7 +22,6 @@ const MODES = {
     key: 'RAPID',
     label: 'RAPID — 속도 우선: 지속 ~3.5 · 순간 ~4.2 피스/초, 오배치 ~3% (자가 교정됨)',
     opts: {
-      preciseKeys: true,   // see cdp.js preciseSleep
       tapHoldMs: 17,       // at least one 60fps frame, or the game can miss the key
       tapGapMs: 5,         // shorter gaps drop taps
       afterRotateMs: 10,
