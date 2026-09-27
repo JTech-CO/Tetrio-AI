@@ -4,6 +4,7 @@
 // re-measure a size, including one whose automatic calibration was recorded as failed.
 const { Tetrio } = require('../src/runtime/cdp');
 const { applyFocusSpoof } = require('../src/runtime/focus');
+const { applyAdblock, applyCosmetics, sweepAds } = require('../src/runtime/adblock');
 const { ZenBot } = require('../src/bot');
 const { MODES } = require('../src/modes');
 const { calibrateInputs } = require('../src/input/autocalibrate');
@@ -17,6 +18,8 @@ async function main() {
   try {
     t = await Tetrio.connect({ port });
     await applyFocusSpoof(t);
+    // As in run.js: a long measurement without it lets ad iframes pile up in the renderer.
+    try { await applyAdblock(t); await applyCosmetics(t); await sweepAds(t); } catch (e) {}
     visual = await require('../src/runtime/turbo-environment').acquireTurboEnvironment(t);
     const bot = new ZenBot(t, { ...MODES.RAPID.opts, verifyTimeoutMs: 400 });
     lifecycle.track(bot); lifecycle.checkpoint();
