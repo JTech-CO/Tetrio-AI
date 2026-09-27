@@ -40,7 +40,9 @@ const CONFIGS = [
   const keysT = [];
   bot.runKeys = async (keys) => {
     const t0 = Date.now();
+    let dropAt = null;
     for (const k of keys) {
+      if (k === 'hard') dropAt = performance.now();
       await t.keyDown(k);
       await preciseSleep(HOLD);
       await t.keyUp(k);
@@ -48,6 +50,7 @@ const CONFIGS = [
       if (k === 'cw' || k === 'ccw' || k === '180' || k === 'hold') await preciseSleep(10);
     }
     keysT.push(Date.now() - t0);
+    return { dropAt }; // the play loop times its waits from the hard drop
   };
 
   for (const cfg of CONFIGS) {

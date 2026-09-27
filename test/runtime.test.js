@@ -69,7 +69,7 @@ test('ordinary modes send taps on a precise schedule without waiting for replies
   } }, async close() {} });
   const bot = new ZenBot(t, MODES.RAPID.opts);
   const start = performance.now();
-  assert.equal(await bot.runKeys(['cw', 'left', 'hard']), true);
+  const { dropAt } = await bot.runKeys(['cw', 'left', 'hard']);
   const elapsed = performance.now() - start;
   assert.deepEqual(sent.map(s => s.event), ['rawKeyDown:ArrowUp', 'keyUp:ArrowUp',
     'rawKeyDown:ArrowLeft', 'keyUp:ArrowLeft', 'keyDown:Space', 'keyUp:Space']);
@@ -77,6 +77,7 @@ test('ordinary modes send taps on a precise schedule without waiting for replies
   assert.ok(offset(1) >= 16 && offset(1) < 35, 'hold ' + offset(1));
   // hard drop at 17 hold + 5 gap + 10 rotate settle + 17 hold + 5 gap = 54ms
   assert.ok(offset(4) >= 53 && offset(4) < 90, 'hard drop at ' + offset(4));
+  assert.ok(Math.abs(dropAt - sent[4].at) < 2, 'dropAt is the hard-drop key press');
   // Waiting for every 40ms reply would take well over 300ms.
   assert.ok(elapsed < 200, 'elapsed ' + elapsed);
   assert.equal(t.pressedKeys.size, 0);
@@ -225,7 +226,7 @@ test('the play loop decides with the current strategy and counts quads', async (
   const play = async (strategy) => {
     const bot = new ZenBot({}, { postDropMs: 0, strategy });
     bot.readState = async () => ({ current: 'I', queue: ['T', 'O', 'S'], hold: null, stackFilled: oneReady() });
-    bot.runKeys = async () => true;
+    bot.runKeys = async () => ({ dropAt: performance.now() });
     await bot.runLegacy({ maxPieces: 1, maxMs: 1000 });
     return bot;
   };
@@ -267,7 +268,7 @@ test('ordinary loop discards transient board reads before selecting the next pla
   let reads = 0, inputs = 0;
   bot.readState = async () => ({ current: 'T', queue: ['I', 'O'], hold: null,
     stackFilled: ++reads === 1 ? Array.from({ length: 20 }, () => Array(10).fill('I')) : empty() });
-  bot.runKeys = async () => { inputs++; return true; };
+  bot.runKeys = async () => { inputs++; return { dropAt: performance.now() }; };
   await bot.run({ maxPieces: 1, maxMs: 1000 });
   assert.equal(reads, 2);
   assert.equal(inputs, 1);
@@ -281,11 +282,43 @@ test('a persistent mismatch costs one re-read, not a retry chain on the critical
   let reads = 0;
   bot.readState = async () => { reads++; return { current: 'T', queue: ['I', 'O'], hold: null,
     stackFilled: Array.from({ length: 20 }, () => Array(10).fill('I')) }; };
-  bot.runKeys = async () => true;
+  bot.runKeys = async () => ({ dropAt: performance.now() });
   await bot.run({ maxPieces: 1, maxMs: 1000 });
   assert.equal(reads, 2);
   assert.equal(bot.mispredicts, 1);
   assert.equal(bot.transientReads, 1);
+});
+
+test('the next piece waits for its spawn time, counted from the hard-drop key press', () => {
+  const basic = new ZenBot({}, { ...MODES.BASIC.opts });
+  basic.measuredSpawnMs = 65;
+  assert.equal(basic.spawnDelayMs(), 17 + 120, 'BASIC keeps its own margin');
+  const rapid = new ZenBot({}, { ...MODES.RAPID.opts });
+  assert.equal(rapid.spawnDelayMs(), 17 + 95, 'no TURBO profile for this window');
+  rapid.measuredSpawnMs = 65;
+  assert.equal(rapid.spawnDelayMs(), 65, 'TURBO measured this window');
+  const override = new ZenBot({}, { ...MODES.RAPID.opts, postDropMs: 150, modeOverrides: { postDropMs: 150 } });
+  override.measuredSpawnMs = 65;
+  assert.equal(override.spawnDelayMs(), 17 + 150, '--postdrop wins');
+});
+
+test('the loop reads after the settle and sends the next keys after the spawn delay', async () => {
+  for (const mode of ['BASIC', 'RAPID']) {
+    const bot = new ZenBot({}, { ...MODES[mode].opts, mode });
+    bot.measuredSpawnMs = 80;
+    const reads = [], drops = [];
+    bot.readState = async () => { reads.push(performance.now());
+      return { current: 'T', queue: ['I', 'O'], hold: null, stackFilled: empty() }; };
+    bot.runKeys = async () => { const dropAt = performance.now(); drops.push(dropAt); return { dropAt }; };
+    await bot.runLegacy({ maxPieces: 2, maxMs: 2000 });
+    const o = bot.opts;
+    const settle = o.tapHoldMs + o.settleMs; // an empty board clears no lines
+    const read = reads.find(t => t > drops[0]) - drops[0];
+    assert.ok(read >= settle - 1 && read < settle + 15, `${mode} read ${read.toFixed(1)}ms after the drop`);
+    const spawn = mode === 'RAPID' ? 80 : o.tapHoldMs + o.postDropMs;
+    const next = drops[1] - drops[0];
+    assert.ok(next >= spawn - 1 && next < Math.max(spawn, settle) + 20, `${mode} next keys ${next.toFixed(1)}ms after the drop`);
+  }
 });
 
 test('RAPID bridges a few clean pieces, then hands back to TURBO only once the stack is low', async () => {
@@ -297,7 +330,7 @@ test('RAPID bridges a few clean pieces, then hands back to TURBO only once the s
     bot.resumeTurbo = true; bot.fellBackAt = 0; bot.slowCaptures = slowCaptures;
     let inputs = 0;
     bot.readState = async () => ({ current: 'T', queue: ['I', 'O'], hold: null, stackFilled: stack(height) });
-    bot.runKeys = async () => { inputs++; return true; };
+    bot.runKeys = async () => { inputs++; return { dropAt: performance.now() }; };
     await bot.runLegacy({ maxPieces, maxMs: 2000 });
     return { bot, inputs };
   };

@@ -2,7 +2,8 @@
 // The BASIC/RAPID play loop: read the screen, pick a move, send the keys over CDP.
 // TURBO's loop is in src/turbo.js.
 
-const { Tetrio, sleep } = require('./runtime/cdp.js');
+const { performance } = require('node:perf_hooks');
+const { Tetrio, sleep, preciseSleep } = require('./runtime/cdp.js');
 const { applyFocusSpoof } = require('./runtime/focus.js');
 const { applyAdblock, applyCosmetics, sweepAds } = require('./runtime/adblock.js');
 const { Vision } = require('./vision/vision.js');
@@ -12,22 +13,24 @@ const { pickMove } = require('./ai.js');
 const { knownQueue } = require('./state.js');
 const { planTaps } = require('./input/planner.js');
 const { InputExecutor } = require('./input/executor.js');
+const { calibrationStatus } = require('./input/calibration.js');
 
 const DEFAULTS = {
   // BASIC values (presets in src/modes.js). Measured floors: a hold shorter than one 60fps
-  // frame (17ms), a gap under 5ms or a shorter postDropMs make the game miss keys.
+  // frame (17ms), a gap under 5ms or a shorter postDropMs make the game miss keys. Waits after
+  // a hard drop count from the moment its key is released.
   tapHoldMs: 17,     // keydown duration for a single tap
   tapGapMs: 5,       // gap between taps
   afterRotateMs: 10, // extra settle after a rotate or hold
-  postDropMs: 120,   // wait after a hard drop until the next piece can be moved
+  postDropMs: 120,   // earliest next input after a hard drop (see spawnDelayMs)
+  settleMs: 60,      // wait before reading the board, so the dropped piece is drawn
+  settleClearMs: 160, // longer when the drop cleared lines (clear animation)
   idleSleepMs: 60,   // sleep between polls while waiting to (re)bootstrap the current piece
   jpegQuality: 85,   // clip capture quality
   recalibrateEvery: 80, // re-detect the field frame every N pieces
   sweepEveryMs: 6000,   // remove accumulating ad iframes this often
   // RAPID-mode levers (inert in BASIC):
-  pipelineRead: false, // capture the post-drop board DURING postDropMs instead of after it
-  settleMs: 60,        // pipelined: wait before capturing (stack must be rendered)
-  settleClearMs: 160,  // pipelined: longer wait when the drop cleared lines (clear animation)
+  pipelineRead: false, // read the board and pick the next move while the next piece spawns
   keyPenalty: 0,       // AI score penalty per keystroke (prefers cheaper placements)
   strategy: 'SINGLE',  // line-clear strategy, orthogonal to the mode (src/modes.js STRATEGIES)
   aiBeam: 0,           // depth-2 child search only for top-N placements (0 = full search)
@@ -61,6 +64,8 @@ class ZenBot {
     this.mispredicts = 0;      // turns where the screen didn't match the previous prediction
     this.transientReads = 0;   // mismatching frames discarded before deciding the next move
     this.lastPredicted = null; // 20x10 matrix predicted by the previous placement
+    this.inputReadyAt = 0;     // performance.now() before which the next piece gets no keys
+    this.measuredSpawnMs = null;
   }
 
   // Switch play-mode preset live (safe between turns — opts are re-read every iteration).
@@ -156,7 +161,20 @@ class ZenBot {
     };
     this.vision = new Vision(this.cal);
     this.dpr = dpr;
+    const measured = calibrationStatus(vp);
+    this.measuredSpawnMs = measured.state === 'valid' ? measured.calibration.spawnMs : null;
     return this.cal;
+  }
+
+  // Earliest keys for the next piece, in ms after the hard-drop key press. RAPID uses the spawn
+  // time TURBO measured at this window size when there is one (src/input/autocalibrate.js);
+  // otherwise, or when --postdrop was given, postDropMs counts from the key release.
+  spawnDelayMs() {
+    const o = this.opts;
+    if (o.pipelineRead && this.measuredSpawnMs != null && this.modeOverrides.postDropMs == null) {
+      return this.measuredSpawnMs;
+    }
+    return o.tapHoldMs + o.postDropMs;
   }
 
   // An interrupted capture can leave the page view stuck at clip size (see cdp.js captureChain).
@@ -277,18 +295,18 @@ class ZenBot {
 
   // Sends the taps on a precise schedule without waiting for each CDP reply, as TURBO does
   // (src/input/executor.js). Awaiting replies and Windows' ~15.6ms timer ticks used to stretch
-  // every tap. Returns false when stopped; an input error releases the keys and throws.
+  // every tap. Returns { dropAt } (the hard-drop key press), or false when stopped; an input
+  // error releases the keys and throws.
   async runKeys(keys) {
     if (this.stop) return false;
     const o = this.opts;
     const plan = planTaps(keys, { tapHoldMs: o.tapHoldMs, tapGapMs: o.tapGapMs, afterRotateMs: o.afterRotateMs });
     try {
-      await new InputExecutor(this.t).execute(plan, { shouldStop: () => this.stop });
+      return await new InputExecutor(this.t).execute(plan, { shouldStop: () => this.stop });
     } catch (e) {
       if (this.stop) return false;
       throw e;
     }
-    return true;
   }
 
   // Play a single piece. If verify=true, returns { predicted, actualStack, match }.
@@ -429,21 +447,25 @@ class ZenBot {
           await sleep(120); continue;
         }
         idleSince = 0;
-        if (await this.runKeys(mv.keys) === false) break;
+        await preciseSleep(Math.max(0, this.inputReadyAt - performance.now()));
+        const sent = await this.runKeys(mv.keys);
+        if (sent === false) break;
         this.piecesPlaced++;
         this.countClear(mv.expectedResult.linesCleared);
         this.advanceCurrent(queueBefore, mv.useHold, holdBefore);
         this.lastPredicted = boardToVisibleMatrix(mv.expectedResult.board);
         if (onTurn) onTurn({ mv, piecesPlaced: this.piecesPlaced, linesEstimate: this.linesEstimate,
                              stageUps: this.stageUps, resyncs: this.resyncs, mispredicts: this.mispredicts });
+        // Both waits count from the hard drop itself, not from when the CDP replies came back.
+        const settle = mv.expectedResult.linesCleared > 0 ? this.opts.settleClearMs : this.opts.settleMs;
+        const readAt = sent.dropAt + this.opts.tapHoldMs + settle;
+        this.inputReadyAt = sent.dropAt + this.spawnDelayMs();
         if (this.opts.pipelineRead) {
-          // RAPID: read the board and pick the next move while waiting after the drop, after a
-          // short settle (longer after a line clear). A failure gives null and the next turn
-          // reads again.
-          const settle = mv.expectedResult.linesCleared > 0 ? this.opts.settleClearMs : this.opts.settleMs;
+          // RAPID: read the board and pick the next move while the next piece spawns. A failure
+          // gives null and the next turn reads again.
           pending = (async () => {
             try {
-              await sleep(settle);
+              await preciseSleep(Math.max(0, readAt - performance.now()));
               const st2 = await this.readState();
               let mv2 = null, ready = false;
               try {
@@ -460,9 +482,9 @@ class ZenBot {
               return { st: st2, mv: mv2, mvReady: ready };
             } catch (e) { return null; }
           })();
-          await sleep(this.opts.postDropMs);
         } else {
-          await sleep(this.opts.postDropMs); // let the piece lock + the next piece become controllable
+          // BASIC reads the settled board at the top of the next turn.
+          await preciseSleep(Math.max(0, readAt - performance.now()));
         }
       }
     } finally {

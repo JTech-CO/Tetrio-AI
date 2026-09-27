@@ -13,8 +13,8 @@ const MODES = {
       afterRotateMs: 10,
       postDropMs: 120,
       pipelineRead: false,
-      settleMs: 60,        // unused while pipelineRead is off
-      settleClearMs: 160,
+      settleMs: 60,        // read the board this long after the hard drop
+      settleClearMs: 160,  // longer when the drop cleared lines (clear animation)
       keyPenalty: 0,
     },
   },
@@ -25,7 +25,7 @@ const MODES = {
       tapHoldMs: 17,       // at least one 60fps frame, or the game can miss the key
       tapGapMs: 5,         // shorter gaps drop taps
       afterRotateMs: 10,
-      postDropMs: 95,      // earliest next input after a hard drop
+      postDropMs: 95,      // earliest next input after a hard drop, unless TURBO measured this window
       pipelineRead: true,
       settleMs: 15,        // wait before reading, so the dropped piece is drawn
       settleClearMs: 70,   // longer when the drop cleared lines (clear animation)
