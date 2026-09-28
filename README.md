@@ -13,8 +13,8 @@
   <img alt="Node.js 18+" src="https://img.shields.io/badge/Node.js-18%2B-339933?logo=nodedotjs&logoColor=white">
   <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows-0078D4">
   <img alt="Target: TETR.IO ZEN" src="https://img.shields.io/badge/target-TETR.IO%20ZEN-7c3aed">
-  <img alt="Tests: 98 passing" src="https://img.shields.io/badge/tests-98%20passing-2ea44f">
-  <img alt="Dependencies: 3" src="https://img.shields.io/badge/dependencies-3-555555">
+  <img alt="Tests: 105 passing" src="https://img.shields.io/badge/tests-105%20passing-2ea44f">
+  <img alt="Dependencies: 4" src="https://img.shields.io/badge/dependencies-4-555555">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <br>
   <img alt="AI: hand-tuned heuristic, no ML" src="https://img.shields.io/badge/AI-hand--tuned%20heuristic%2C%20no%20ML-db2777">
@@ -53,11 +53,11 @@ The bot runs TETR.IO with its debug port (9222) open, and the app keeps running 
 
 | Speed | How it plays | Measured pieces/s |
 |---|---|---:|
-| BASIC | Reads the screen after every piece, then decides and presses keys | 2.3–2.4 |
-| RAPID | Reads the screen and decides while waiting for the next piece | 4.1–4.3 |
-| TURBO | Plans up to two pieces ahead with input timing calibrated per window size, and checks the screen in the background | 5.8–7.0 |
+| BASIC | Reads the screen after every piece, then decides and presses keys | 3.7 |
+| RAPID | Reads the screen and decides while waiting for the next piece | 4.3–4.5 |
+| TURBO | Plans up to two pieces ahead with input timing calibrated per window size, and checks the screen in the background | 5.9–7.0 |
 
-**Blue = SINGLE, orange = QUAD.** Measured on stretches without a level transition.
+**Blue = SINGLE, orange = QUAD.** Measured on stretches without a level transition, after the 2026-09-28 speed work, in a 1295×997 window. TURBO·QUAD is the 09-25 measurement.
 
 ```mermaid
 %%{init: {"xyChart": {"height": 360}, "themeVariables": {"xyChart": {"plotColorPalette": "#3987e5, #d95926"}}}}%%
@@ -66,8 +66,8 @@ xychart-beta
     x-axis ["BASIC·SINGLE", "BASIC·QUAD", "RAPID·SINGLE", "RAPID·QUAD", "TURBO·SINGLE", "TURBO·QUAD"]
     y-axis "pieces/s" 0 --> 8
     %% A negative value draws no bar: mermaid draws 0 as an 8px bar.
-    bar [2.42, -5, 4.13, -5, 5.84, -5]
-    bar [-5, 2.33, -5, 4.29, -5, 6.99]
+    bar [3.70, -5, 4.47, -5, 5.86, -5]
+    bar [-5, 3.68, -5, 4.33, -5, 6.99]
 ```
 
 ## Line-clear strategies
@@ -175,7 +175,7 @@ Every run and the source of each chart are in the **[play log index](docs/PLAY-L
 | `--restart` | off | Restart the app first |
 | `--restart-every N` / `--restart-mins M` | 2500 / 20 | Restart the app on whichever comes first; 0 turns one off |
 | `--quality Q` | 85 | JPEG capture quality (1–100) |
-| `--postdrop N` | per speed | BASIC/RAPID wait after a hard drop (ms, at least 90) |
+| `--postdrop N` | per speed | BASIC/RAPID: earliest next input after the hard-drop key is released (ms, at least 90). When given, RAPID uses it instead of the window's calibrated spawn time |
 | `--no-adblock` | off | Turn off ad blocking |
 
 TURBO needs its input timing calibrated for each window size. At a new size it calibrates itself when it starts, which takes 2–4 minutes. A maximized window can fail calibration, so run TURBO in a normal window. See [TURBO: how it works and results](docs/TURBO-RESULTS-KR.md#실행과-보정) (Korean).
@@ -203,6 +203,8 @@ TURBO needs its input timing calibrated for each window size. At a new size it c
 ## Development
 
 `npm test` runs the regression tests. The AI is in `src/ai.js`, the board model in `src/board.js`, the BASIC/RAPID loop in `src/bot.js`, and TURBO in `src/turbo.js`.
+
+It has four dependencies: `chrome-remote-interface` (CDP), `@cwasm/jpeg-turbo` (capture decoding, compiled to WebAssembly), `jpeg-js` (fallback decoder and diagnostic images), and `pngjs` (PNG decoding for field detection).
 
 Documents (Korean):
 

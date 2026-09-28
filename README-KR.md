@@ -13,8 +13,8 @@
   <img alt="Node.js 18+" src="https://img.shields.io/badge/Node.js-18%2B-339933?logo=nodedotjs&logoColor=white">
   <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows-0078D4">
   <img alt="Target: TETR.IO ZEN" src="https://img.shields.io/badge/target-TETR.IO%20ZEN-7c3aed">
-  <img alt="Tests: 98 passing" src="https://img.shields.io/badge/tests-98%20passing-2ea44f">
-  <img alt="Dependencies: 3" src="https://img.shields.io/badge/dependencies-3-555555">
+  <img alt="Tests: 105 passing" src="https://img.shields.io/badge/tests-105%20passing-2ea44f">
+  <img alt="Dependencies: 4" src="https://img.shields.io/badge/dependencies-4-555555">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <br>
   <img alt="AI: hand-tuned heuristic, no ML" src="https://img.shields.io/badge/AI-hand--tuned%20heuristic%2C%20no%20ML-db2777">
@@ -53,11 +53,11 @@ ZEN 화면을 찾으면 시작 메뉴가 뜹니다. 콘솔에 `[속도]-[방식]
 
 | 속도 | 동작 | 실측 피스/초 |
 |---|---|---:|
-| BASIC | 매 피스 화면을 읽은 뒤 계산하고 입력 | 2.3~2.4 |
-| RAPID | 화면 읽기와 계산을 새 피스 대기와 겹쳐 수행 | 4.1~4.3 |
-| TURBO | 창 크기별로 보정한 입력으로 최대 2피스 앞서 두고, 화면 검증은 뒤에서 따로 | 5.8~7.0 |
+| BASIC | 매 피스 화면을 읽은 뒤 계산하고 입력 | 3.7 |
+| RAPID | 화면 읽기와 계산을 새 피스 대기와 겹쳐 수행 | 4.3~4.5 |
+| TURBO | 창 크기별로 보정한 입력으로 최대 2피스 앞서 두고, 화면 검증은 뒤에서 따로 | 5.9~7.0 |
 
-**파랑 = SINGLE, 주황 = QUAD.** 레벨 전환이 없는 구간의 실측값입니다.
+**파랑 = SINGLE, 주황 = QUAD.** 레벨 전환이 없는 구간의 실측값입니다. 2026-09-28 속도 최적화 뒤 1295×997 창에서 쟀고, TURBO·QUAD만 09-25 측정값입니다.
 
 ```mermaid
 %%{init: {"xyChart": {"height": 360}, "themeVariables": {"xyChart": {"plotColorPalette": "#3987e5, #d95926"}}}}%%
@@ -66,8 +66,8 @@ xychart-beta
     x-axis ["BASIC·SINGLE", "BASIC·QUAD", "RAPID·SINGLE", "RAPID·QUAD", "TURBO·SINGLE", "TURBO·QUAD"]
     y-axis "피스/초" 0 --> 8
     %% 음수 = 막대 없음. mermaid는 0도 8px 막대로 그리므로 값이 없는 칸은 -5로 둔다.
-    bar [2.42, -5, 4.13, -5, 5.84, -5]
-    bar [-5, 2.33, -5, 4.29, -5, 6.99]
+    bar [3.70, -5, 4.47, -5, 5.86, -5]
+    bar [-5, 3.68, -5, 4.33, -5, 6.99]
 ```
 
 ## 라인 클리어 방식
@@ -175,7 +175,7 @@ TURBO·QUAD로 1,500피스를 282초에 두었고, 쿼드는 140회, 오배치�
 | `--restart` | 꺼짐 | 앱 재시작 |
 | `--restart-every N` / `--restart-mins M` | 2500 / 20 | 먼저 도달한 조건에서 재시작, 0은 해제 |
 | `--quality Q` | 85 | JPEG 품질(1–100) |
-| `--postdrop N` | 모드별 | BASIC/RAPID 드롭 후 대기(ms, 최소 90) |
+| `--postdrop N` | 모드별 | BASIC/RAPID에서 하드 드롭 키를 뗀 뒤 다음 입력까지의 최소 대기(ms, 최소 90). 주면 RAPID도 창 크기별 보정 스폰값 대신 이 값을 씁니다 |
 | `--no-adblock` | 꺼짐 | 광고 차단 비활성화 |
 
 TURBO는 창 크기마다 입력 보정이 필요합니다. 처음 보는 크기면 시작할 때 자동으로 보정하며 2~4분 걸립니다. 최대화 창에서는 보정이 실패할 수 있으니 창 모드로 실행하세요. 자세한 내용은 [TURBO 동작·검증](docs/TURBO-RESULTS-KR.md#실행과-보정)에 있습니다.
@@ -203,6 +203,8 @@ TURBO는 창 크기마다 입력 보정이 필요합니다. 처음 보는 크기
 ## 개발·문서
 
 `npm test`로 회귀 테스트를 실행합니다. AI는 `src/ai.js`, 보드 모델은 `src/board.js`, BASIC·RAPID 루프는 `src/bot.js`, TURBO는 `src/turbo.js`에 있습니다.
+
+의존성은 4개입니다. `chrome-remote-interface`(CDP 연결), `@cwasm/jpeg-turbo`(WebAssembly로 만든 캡처 해독기), `jpeg-js`(해독 예비·진단 이미지 저장), `pngjs`(필드를 찾을 때 PNG 해독)입니다.
 
 - [플레이 로그 모음](docs/PLAY-LOGS-KR.md)
 - [TURBO 동작·검증](docs/TURBO-RESULTS-KR.md)

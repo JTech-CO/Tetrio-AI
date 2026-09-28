@@ -6,7 +6,7 @@
 const MODES = {
   BASIC: {
     key: 'BASIC',
-    label: 'BASIC — 안정 우선: ~3.4 피스/초, 오배치 ~0% (검증됨)',
+    label: 'BASIC — 안정 우선: ~3.7 피스/초, 오배치 ~0% (검증됨)',
     opts: {
       tapHoldMs: 17,       // same measured key timing as RAPID and TURBO
       tapGapMs: 5,
@@ -20,7 +20,7 @@ const MODES = {
   },
   RAPID: {
     key: 'RAPID',
-    label: 'RAPID — 속도 우선: 지속 ~3.5 · 순간 ~4.2 피스/초, 오배치 ~3% (자가 교정됨)',
+    label: 'RAPID — 속도 우선: ~4.5 피스/초, 오배치 ~0% (레벨 전환 제외)',
     opts: {
       tapHoldMs: 17,       // at least one 60fps frame, or the game can miss the key
       tapGapMs: 5,         // shorter gaps drop taps
@@ -38,7 +38,7 @@ const MODES = {
 
 MODES.TURBO = {
   key: 'TURBO',
-  label: 'TURBO — 실험용 예측 실행 (입력 보정 필수, 목표 5.0+ PPS)',
+  label: 'TURBO — 예측 실행: ~5.9~7.0 피스/초 (창 크기별 입력 보정 필요)',
   opts: { ...MODES.RAPID.opts, predictDepth: 2, verifyEvery: 4, inputPenalty: 0.01,
     turboFallback: 'RAPID', verifyTimeoutMs: 400, maxMismatchStreak: 2 },
 };
