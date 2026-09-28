@@ -2,6 +2,27 @@
 const CDP = require('chrome-remote-interface');
 const jpeg = require('jpeg-js');
 
+// libjpeg-turbo compiled to WebAssembly decodes a capture 4-5x faster than jpeg-js, and on
+// recorded live captures both gave identical board, NEXT and HOLD reads outside level-transition
+// animations. jpeg-js remains the fallback. An error thrown inside the WASM decoder can leave its
+// state unusable, so after one it is not used again.
+let turbo = null;
+try { turbo = require('@cwasm/jpeg-turbo'); } catch (e) { /* jpeg-js only */ }
+
+function decodeJpeg(buf) {
+  if (turbo) {
+    try {
+      const im = turbo.decode(buf);
+      return { width: im.width, height: im.height, data: im.data };
+    } catch (e) {
+      turbo = null;
+      console.warn('[capture] WASM JPEG decoder failed, using jpeg-js from now on:', e.message);
+    }
+  }
+  const raw = jpeg.decode(buf, { useTArray: true, formatAsRGBA: true });
+  return { width: raw.width, height: raw.height, data: raw.data };
+}
+
 const KEYS = {
   left:  { key: 'ArrowLeft',  code: 'ArrowLeft',  keyCode: 37 },
   right: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
@@ -146,15 +167,14 @@ class Tetrio {
     return Buffer.from(shot.data, 'base64');
   }
 
-  // Fast path for the play loop: JPEG capture (small payload) + jpeg-js decode.
+  // Fast path for the play loop: JPEG capture (small payload) + decodeJpeg.
   // Returns a pngjs-compatible image object { width, height, data(RGBA) }.
   // `clip` is in CSS pixels with a `scale` (use scale = DPR to keep device resolution).
   async captureRegion(clip = null, quality = 85, { timeoutMs = 8000 } = {}) {
     const opts = { format: 'jpeg', quality };
     if (clip) opts.clip = { x: clip.x, y: clip.y, width: clip.w, height: clip.h, scale: clip.scale || 1 };
     const shot = await this._capture(opts, timeoutMs);
-    const raw = jpeg.decode(Buffer.from(shot.data, 'base64'), { useTArray: true, formatAsRGBA: true });
-    return { width: raw.width, height: raw.height, data: raw.data };
+    return decodeJpeg(Buffer.from(shot.data, 'base64'));
   }
 
   async keyDown(name) {
@@ -272,4 +292,4 @@ class Tetrio {
   }
 }
 
-module.exports = { Tetrio, KEYS, sleep, preciseSleep };
+module.exports = { Tetrio, KEYS, sleep, preciseSleep, decodeJpeg };
