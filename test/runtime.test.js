@@ -346,7 +346,8 @@ test('RAPID bridges a few clean pieces, then hands back to TURBO only once the s
   const stack = h => Array.from({ length: 20 }, (_, y) =>
     Array.from({ length: 10 }, (_, x) => (y >= 20 - h && x > 0) ? 'I' : null));
   const run = async (height, maxPieces, slowCaptures = 0) => {
-    const bot = new ZenBot({}, { postDropMs: 0 });
+    // No real waits after a drop: this is about the hand-back rule, not timing.
+    const bot = new ZenBot({}, { postDropMs: 0, settleMs: 0, settleClearMs: 0 });
     bot.resumeTurbo = true; bot.fellBackAt = 0; bot.slowCaptures = slowCaptures;
     let inputs = 0;
     bot.readState = async () => ({ current: 'T', queue: ['I', 'O'], hold: null, stackFilled: stack(height) });
