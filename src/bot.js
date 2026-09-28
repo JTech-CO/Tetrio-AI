@@ -27,7 +27,7 @@ const DEFAULTS = {
   settleClearMs: 160, // longer when the drop cleared lines (clear animation)
   idleSleepMs: 60,   // sleep between polls while waiting to (re)bootstrap the current piece
   jpegQuality: 85,   // clip capture quality
-  recalibrateEvery: 80, // re-detect the field frame every N pieces
+  recalibrateEvery: 80, // every N pieces, re-detect the field frame if the geometry is in doubt
   sweepEveryMs: 6000,   // remove accumulating ad iframes this often
   // RAPID-mode levers (inert in BASIC):
   pipelineRead: false, // read the board and pick the next move while the next piece spawns
@@ -175,6 +175,15 @@ class ZenBot {
       return this.measuredSpawnMs;
     }
     return o.tapHoldMs + o.postDropMs;
+  }
+
+  // Same page size as at the last calibration? A failed check counts as no.
+  async sameViewport() {
+    if (!this.calViewport) return false;
+    try {
+      const vp = await this.t.viewport();
+      return ['w', 'h', 'dpr'].every(k => vp[k] === this.calViewport[k]);
+    } catch (e) { return false; }
   }
 
   // An interrupted capture can leave the page view stuck at clip size (see cdp.js captureChain).
@@ -363,7 +372,7 @@ class ZenBot {
   }
 
   async runLegacy({ maxPieces = Infinity, maxMs = Infinity, onTurn = null } = {}) {
-    let idle = 0, lastRecal = 0, lastSweep = Date.now();
+    let idle = 0, lastRecal = 0, recalMispredicts = this.mispredicts, lastSweep = Date.now();
     const runStart = Date.now();
     let idleSince = 0; // wall-clock start of the CURRENT continuous no-piece stretch (0 = playing)
     const IDLE_MAX_MS = 60000; // independent deadline: a stuck no-piece screen throws -> restart
@@ -371,9 +380,15 @@ class ZenBot {
     try {
       while (!this.stop && this.piecesPlaced < maxPieces && Date.now() - runStart < maxMs) {
         if (this.pendingMode) break;
+        // As in TURBO, boards that matched the prediction already prove the field geometry, so
+        // the full frame detect runs only after a misprediction or a page size change.
         if (this.piecesPlaced > 0 && this.piecesPlaced - lastRecal >= this.opts.recalibrateEvery) {
-          if (pending) { try { await pending; } catch (e) {} pending = null; } // used the old cal — discard
-          await this.calibrate(); lastRecal = this.piecesPlaced;
+          lastRecal = this.piecesPlaced;
+          if (this.mispredicts !== recalMispredicts || !(await this.sameViewport())) {
+            if (pending) { try { await pending; } catch (e) {} pending = null; } // used the old cal — discard
+            await this.calibrate();
+          }
+          recalMispredicts = this.mispredicts;
         }
         // Remove ad iframes now and then (they pile up and crash the renderer); don't wait.
         if (Date.now() - lastSweep >= this.opts.sweepEveryMs) {
@@ -423,7 +438,7 @@ class ZenBot {
             if (onTurn) onTurn({ idleWarning: true, piecesPlaced: this.piecesPlaced });
             // Long idling often means a stale calibration: recalibrate, but let a degradation
             // error through so the app restarts now.
-            try { await this.calibrate(); lastRecal = this.piecesPlaced; }
+            try { await this.calibrate(); lastRecal = this.piecesPlaced; recalMispredicts = this.mispredicts; }
             catch (e) { if (e && e.degraded) throw e; }
             idle = 0;
           }

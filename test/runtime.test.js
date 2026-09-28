@@ -302,6 +302,26 @@ test('the next piece waits for its spawn time, counted from the hard-drop key pr
   assert.equal(override.spawnDelayMs(), 17 + 150, '--postdrop wins');
 });
 
+test('periodic recalibration runs only after a misprediction or a page size change', async () => {
+  const vp = { w: 1295, h: 997, dpr: 2 };
+  const play = async ({ resizeAt = Infinity, mismatchAt = -1 } = {}) => {
+    const bot = new ZenBot({ viewport: async () => (bot.piecesPlaced >= resizeAt ? { ...vp, w: 1311 } : vp) },
+      { settleMs: 0, settleClearMs: 0, postDropMs: 0, recalibrateEvery: 2 });
+    bot.calViewport = vp;
+    let calibrations = 0;
+    bot.calibrate = async () => { calibrations++; };
+    // The screen shows the predicted stack, except on the turn after piece `mismatchAt`.
+    bot.readState = async () => ({ current: 'T', queue: ['I', 'O'], hold: null,
+      stackFilled: bot.piecesPlaced === mismatchAt ? empty() : (bot.lastPredicted || empty()) });
+    bot.runKeys = async () => ({ dropAt: performance.now() });
+    await bot.runLegacy({ maxPieces: 6, maxMs: 3000 });
+    return { calibrations, mispredicts: bot.mispredicts };
+  };
+  assert.deepEqual(await play(), { calibrations: 0, mispredicts: 0 }, 'matching boards prove the geometry');
+  assert.deepEqual(await play({ resizeAt: 3 }), { calibrations: 1, mispredicts: 0 });
+  assert.deepEqual(await play({ mismatchAt: 3 }), { calibrations: 1, mispredicts: 1 });
+});
+
 test('the loop reads after the settle and sends the next keys after the spawn delay', async () => {
   for (const mode of ['BASIC', 'RAPID']) {
     const bot = new ZenBot({}, { ...MODES[mode].opts, mode });
